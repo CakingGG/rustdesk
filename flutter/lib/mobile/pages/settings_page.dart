@@ -1335,8 +1335,18 @@ class __DisplayPageState extends State<_DisplayPage> {
         ),
         SettingsSection(
           title: Text(translate('Other Default Options')),
-          tiles:
-              otherDefaultSettings().map((e) => otherRow(e.$1, e.$2)).toList(),
+          tiles: [
+            if (isAndroid)
+              SettingsTile.switchTile(
+                title: Text('${translate("Virtual display")} (Windows)'),
+                initialValue: bind.mainGetLocalOption(key: kOptionPhoneWorkspace) != 'N',
+                onToggle: isOptionFixed(kOptionPhoneWorkspace) ? null : (enabled) async {
+                  await bind.mainSetLocalOption(key: kOptionPhoneWorkspace, value: enabled ? 'Y' : 'N');
+                  if (mounted) setState(() {});
+                },
+              ),
+            ...otherDefaultSettings().map((e) => otherRow(e.$1, e.$2)),
+          ],
         ),
       ]),
     );

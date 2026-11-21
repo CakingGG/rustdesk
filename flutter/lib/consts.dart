@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 export 'common/widgets/keyboard_shortcuts/shortcut_constants.dart';
 
 const int kMaxVirtualDisplayCount = 4;
+const String kOptionPhoneWorkspace = 'phone-workspace';
 const int kAllVirtualDisplay = -1;
 
 const double kDesktopRemoteTabBarHeight = 28.0;

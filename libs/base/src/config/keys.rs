@@ -47,6 +47,7 @@ pub const OPTION_ENABLE_REMOTE_RESTART: &str = "enable-remote-restart";
 pub const OPTION_ENABLE_RECORD_SESSION: &str = "enable-record-session";
 pub const OPTION_ENABLE_BLOCK_INPUT: &str = "enable-block-input";
 pub const OPTION_ENABLE_PRIVACY_MODE: &str = "enable-privacy-mode";
+pub const OPTION_PHONE_WORKSPACE: &str = "phone-workspace";
 pub const OPTION_ENABLE_PERM_CHANGE_IN_ACCEPT_WINDOW: &str = "enable-perm-change-in-accept-window";
 pub const OPTION_HIDE_ELEVATE_BUTTON_IN_ACCEPT_WINDOW: &str =
     "hide-elevate-button-in-accept-window";

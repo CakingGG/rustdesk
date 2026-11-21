@@ -3874,7 +3874,9 @@ impl LoginConfigHandler {
             ..Default::default()
         };
         #[cfg(target_os = "android")]
-        if self.conn_type == ConnType::DEFAULT_CONN {
+        if self.conn_type == ConnType::DEFAULT_CONN
+            && LocalConfig::get_option(keys::OPTION_PHONE_WORKSPACE) != "N"
+        {
             let (width, height) = *PHONE_DISPLAY.lock().unwrap();
             if width > 0 && height > 0 {
                 lr.phone_display = Some(base::message_proto::Resolution {

@@ -569,14 +569,17 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                 color: MyTheme.canvasColor,
                                 child: inputModel.isPhysicalMouse.value
                                     ? getBodyForMobile()
-                                    : Consumer<FfiModel>(builder: (_, model, child) {
-                                        if (model.pi.isPhoneWorkspace && model.touchMode &&
-                                            model.keyboard && !model.viewOnly &&
-                                            !inputModel.relativeMouseMode.value) {
-                                          return PhoneWorkspaceGestures(ffi: gFFI, child: child!);
-                                        }
-                                        return RawTouchGestureDetectorRegion(ffi: gFFI, child: child!);
-                                      }, child: getBodyForMobile()),
+                                    : Consumer<FfiModel>(
+                                        child: getBodyForMobile(),
+                                        builder: (_, model, child) {
+                                          final standard = RawTouchGestureDetectorRegion(
+                                              ffi: gFFI, child: child!);
+                                          if (!model.pi.isPhoneWorkspace || !model.touchMode ||
+                                              !model.keyboard || model.viewOnly) return standard;
+                                          return Obx(() => inputModel.relativeMouseMode.value
+                                              ? standard
+                                              : PhoneWorkspaceGestures(ffi: gFFI, child: child));
+                                        }),
                               );
                             }),
                           ),

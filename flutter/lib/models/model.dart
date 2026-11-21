@@ -159,7 +159,8 @@ class FfiModel with ChangeNotifier {
 
   bool get inputBlocked => _inputBlocked;
 
-  bool get touchMode => _touchMode || (_defaultTouchOnPhoneScreen && _pi.isPhoneWorkspace);
+  bool get touchMode =>
+      _touchMode || (_defaultTouchOnPhoneScreen && _pi.isPhoneWorkspace);
 
   bool get isPeerAndroid => _pi.platform == kPeerPlatformAndroid;
   bool get isPeerMobile => isPeerAndroid;
@@ -1432,9 +1433,13 @@ class FfiModel with ChangeNotifier {
         newDisplays.add(evtToDisplay(displays[i]));
       }
       _pi.displays.value = newDisplays;
-      if (evt['phone_workspace'] == 'true' &&
-          currentDisplay >= 0 && currentDisplay < newDisplays.length) {
-        _pi.phoneWorkspaceName = newDisplays[currentDisplay].name;
+      if (evt['phone_workspace'] == 'true') {
+        if (isCache) {
+          _pi.phoneWorkspaceName = evt['phone_workspace_name'];
+        } else if (currentDisplay >= 0 && currentDisplay < newDisplays.length) {
+          _pi.phoneWorkspaceName = newDisplays[currentDisplay].name;
+          cachedPeerData.peerInfo['phone_workspace_name'] = _pi.phoneWorkspaceName;
+        }
       }
       _pi.displaysCount.value = _pi.displays.length;
       if (_pi.currentDisplay < _pi.displays.length) {
@@ -4526,8 +4531,10 @@ const kInvalidDisplayIndex = -1;
 
 class PeerInfo with ChangeNotifier {
   String? phoneWorkspaceName;
-  bool get isPhoneWorkspace => phoneWorkspaceName?.isNotEmpty == true &&
-      currentDisplay >= 0 && currentDisplay < displays.length &&
+  bool get isPhoneWorkspace =>
+      phoneWorkspaceName?.isNotEmpty == true &&
+      currentDisplay >= 0 &&
+      currentDisplay < displays.length &&
       displays[currentDisplay].name == phoneWorkspaceName;
   String version = '';
   String username = '';
