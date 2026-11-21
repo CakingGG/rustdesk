@@ -14,7 +14,7 @@ internal sealed partial class PhoneWorkspace
     private readonly Panel searchBox = new Panel();
     private readonly Button windowsTab = new Button(), appsTab = new Button(), more = new Button();
     private readonly PickerFlow cards = new PickerFlow();
-    private readonly ReturnHandle returnHandle = new ReturnHandle();
+    private ReturnHandle returnHandle;
     private readonly Dictionary<string, Bitmap> pictures = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
     private bool allApps, layingOut;
     private float unit;
@@ -43,7 +43,11 @@ internal sealed partial class PhoneWorkspace
             menu.Show(more, new Point(more.Width, more.Height), ToolStripDropDownDirection.BelowLeft);
         });
         ConfigureButton(appsButton, "", delegate { ReturnToWindow(); });
+        returnHandle = new ReturnHandle(TargetScreen);
         returnHandle.Click += delegate { ShowPicker(true); };
+        Resize += delegate {
+            if (!expanded && ShowInTaskbar && WindowState == FormWindowState.Normal) ShowPicker(true);
+        };
         groups.BorderStyle = BorderStyle.None;
         groups.SelectedIndexChanged += delegate { if (!layingOut) RefreshEntries(); };
         status.TextChanged += delegate {
@@ -95,11 +99,19 @@ internal sealed partial class PhoneWorkspace
         // Work in phone-sized logical units even when the video is 864 or 1080 pixels wide.
         float scale = Math.Max(0.65f, Math.Min(area.Width, area.Height) / 390f);
         if (!expanded) {
-            returnHandle.Place(area, scale);
-            Hide();
+            if (returnHandle.Place()) {
+                Hide();
+            } else {
+                // Without an Explorer appbar, the minimized picker remains reachable in the taskbar.
+                Text = returnHandle.AccessibleName;
+                WindowState = FormWindowState.Minimized;
+                ShowInTaskbar = true;
+                if (!Visible) Show();
+            }
             return;
         }
-        returnHandle.Hide();
+        returnHandle.Release();
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         layingOut = true;
         try {
             Bounds = area;
@@ -287,12 +299,27 @@ internal sealed partial class PhoneWorkspace
 
     private sealed class ReturnHandle : Form
     {
-        public ReturnHandle()
+        private const int AppBarCallback = 0x8001, AbnPosChanged = 1, AbnFullScreenApp = 2;
+        private const uint AbmNew = 0, AbmRemove = 1, AbmQueryPos = 2, AbmSetPos = 3,
+            AbmActivate = 6, AbmWindowPosChanged = 9, AbeBottom = 3;
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AppBarData {
+            public uint Size; public IntPtr Window; public uint Callback, Edge;
+            public Native.Rect Rect; public IntPtr Param;
+        }
+        [DllImport("shell32.dll")] private static extern UIntPtr SHAppBarMessage(uint message, ref AppBarData data);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int RegisterWindowMessage(string name);
+        private static readonly int TaskbarCreated = RegisterWindowMessage("TaskbarCreated");
+        private readonly Func<Screen> targetScreen;
+        private bool registered, positioning;
+
+        public ReturnHandle(Func<Screen> targetScreen)
         {
+            this.targetScreen = targetScreen;
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            BackColor = Color.FromArgb(28, 67, 124);
-            ForeColor = Color.White;
+            BackColor = PageColor;
+            ForeColor = Color.FromArgb(28, 67, 124);
             Cursor = Cursors.Hand;
             AccessibleName = TextFor("Switch application", "切换应用");
         }
@@ -303,18 +330,85 @@ internal sealed partial class PhoneWorkspace
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            using (var font = new Font(SystemFonts.MessageBoxFont.FontFamily, ClientSize.Height * 0.34f,
+            var label = new Rectangle(0, 0, Math.Min(Width, Height * 3), Height);
+            using (var font = new Font(SystemFonts.MessageBoxFont.FontFamily, ClientSize.Height * 0.32f,
                        FontStyle.Bold, GraphicsUnit.Pixel))
-                TextRenderer.DrawText(e.Graphics, AccessibleName, font, ClientRectangle, ForeColor,
+                TextRenderer.DrawText(e.Graphics, AccessibleName, font, label, ForeColor,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
         }
-        public void Place(Rectangle area, float scale)
+        private AppBarData Data()
         {
-            var size = new Size((int)(144 * scale), (int)(44 * scale));
-            var inset = (int)(8 * scale);
-            Bounds = new Rectangle(area.Right - size.Width - inset, area.Bottom - size.Height - inset,
-                size.Width, size.Height);
+            return new AppBarData { Size = (uint)Marshal.SizeOf(typeof(AppBarData)), Window = Handle,
+                Callback = AppBarCallback, Edge = AbeBottom };
+        }
+        public bool Place()
+        {
+            var screen = targetScreen();
+            if (screen == null) return false;
+            if (!registered) {
+                Bounds = new Rectangle(screen.Bounds.Left, screen.Bounds.Top, screen.Bounds.Width, 1);
+                var data = Data();
+                if (SHAppBarMessage(AbmNew, ref data) == UIntPtr.Zero) return false;
+                registered = true;
+            }
+            if (!PositionBar(screen.Bounds)) { Release(); return false; }
             if (!Visible) Show();
+            return true;
+        }
+        private bool PositionBar(Rectangle monitor)
+        {
+            if (positioning) return true;
+            positioning = true;
+            try {
+                float scale = Math.Max(0.65f, Math.Min(monitor.Width, monitor.Height) / 390f);
+                int bottomClearance = (int)Math.Ceiling(60 * scale);
+                var data = Data();
+                data.Rect = new Native.Rect { Left = monitor.Left, Top = monitor.Bottom - bottomClearance,
+                    Right = monitor.Right, Bottom = monitor.Bottom };
+                if (SHAppBarMessage(AbmQueryPos, ref data) == UIntPtr.Zero) return false;
+                // The taskbar and this strip together also clear the phone's bottom-right expand arrow.
+                int height = Math.Max((int)Math.Ceiling(44 * scale),
+                    bottomClearance - (monitor.Bottom - data.Rect.Bottom));
+                data.Rect.Top = data.Rect.Bottom - height;
+                if (SHAppBarMessage(AbmSetPos, ref data) == UIntPtr.Zero) return false;
+                var bounds = Rectangle.FromLTRB(data.Rect.Left, data.Rect.Top, data.Rect.Right, data.Rect.Bottom);
+                if (bounds.Width <= 0 || bounds.Height <= 0 || !monitor.Contains(bounds)) return false;
+                Bounds = bounds;
+                return true;
+            } finally { positioning = false; }
+        }
+        public void Release()
+        {
+            if (registered) {
+                registered = false;
+                var data = Data();
+                SHAppBarMessage(AbmRemove, ref data);
+            }
+            Hide();
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && registered) Release();
+            base.Dispose(disposing);
+        }
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (!registered) return;
+            if (m.Msg == AppBarCallback && m.WParam.ToInt64() == AbnPosChanged) {
+                var screen = targetScreen();
+                if (screen == null || !PositionBar(screen.Bounds)) { Release(); OnClick(EventArgs.Empty); }
+            } else if (m.Msg == AppBarCallback && m.WParam.ToInt64() == AbnFullScreenApp) {
+                // A true full-screen app owns even the area reserved for the taskbar.
+                Native.SetWindowPos(Handle, m.LParam == IntPtr.Zero ? new IntPtr(-1) : new IntPtr(1),
+                    0, 0, 0, 0, 0x13);
+            } else if (m.Msg == TaskbarCreated) {
+                registered = false;
+                if (!Place()) { Release(); OnClick(EventArgs.Empty); }
+            } else if (m.Msg == 0x0006 || m.Msg == 0x0047) { // WM_ACTIVATE / WM_WINDOWPOSCHANGED
+                var data = Data();
+                SHAppBarMessage(m.Msg == 0x0006 ? AbmActivate : AbmWindowPosChanged, ref data);
+            }
         }
     }
 }
