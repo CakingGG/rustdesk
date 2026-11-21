@@ -129,7 +129,7 @@ internal sealed partial class PhoneWorkspace : Form
             }
             if (!expanded && ManagedWindowAlive()) FollowDialog(screen);
             if (pending == null) return;
-            var match = FindLaunchedWindow();
+            var match = FindAppWindow(pending, beforeLaunch);
             if (match != null) { pending = null; MoveWindowHere(match); }
             else if (DateTime.UtcNow >= deadline) {
                 pending = null;
@@ -234,9 +234,14 @@ internal sealed partial class PhoneWorkspace : Form
         return entries;
     }
 
-    private void SelectApp(Entry entry)
+    private void SelectApp(Entry entry, bool openNew = false)
     {
         if (entry.Window != IntPtr.Zero) { MoveWindowHere(entry); return; }
+        if (!openNew) {
+            beforeLaunch = null;
+            var existing = FindAppWindow(entry, null);
+            if (existing != null) { MoveWindowHere(existing); return; }
+        }
         try {
             entry.ShellItem.InvokeVerb();
             pending = entry;
@@ -245,18 +250,23 @@ internal sealed partial class PhoneWorkspace : Form
         } catch (COMException e) { status.Text = e.Message; }
     }
 
-    private Entry FindLaunchedWindow()
+    private Entry FindAppWindow(Entry app, HashSet<IntPtr> skip)
     {
         var windows = Windows();
         IntPtr foreground = Native.GetForegroundWindow();
-        windows.Sort((a,b) => (b.Window == foreground).CompareTo(a.Window == foreground));
+        int active = windows.FindIndex(e => e.Window == foreground);
+        if (active > 0) {
+            var entry = windows[active];
+            windows.RemoveAt(active);
+            windows.Insert(0, entry);
+        }
         foreach (var candidate in windows) {
-            if (beforeLaunch != null && beforeLaunch.Contains(candidate.Window)) continue;
+            if (skip != null && skip.Contains(candidate.Window)) continue;
             // Hosted and packaged apps can share a process; the window's AppUserModelID wins.
-            if (!String.IsNullOrEmpty(pending.AppId)) {
+            if (!String.IsNullOrEmpty(app.AppId)) {
                 string windowId = Native.WindowAppId(candidate.Window);
                 if (!String.IsNullOrEmpty(windowId)) {
-                    if (String.Equals(windowId, pending.AppId, StringComparison.OrdinalIgnoreCase)) return candidate;
+                    if (String.Equals(windowId, app.AppId, StringComparison.OrdinalIgnoreCase)) return candidate;
                     continue;
                 }
             }
@@ -265,11 +275,11 @@ internal sealed partial class PhoneWorkspace : Form
             try {
                 var id = new StringBuilder(512);
                 int size = id.Capacity;
-                if (!String.IsNullOrEmpty(pending.AppId) && Native.GetApplicationUserModelId(process, ref size, id) == 0 &&
-                    String.Equals(id.ToString(), pending.AppId, StringComparison.OrdinalIgnoreCase)) return candidate;
+                if (!String.IsNullOrEmpty(app.AppId) && Native.GetApplicationUserModelId(process, ref size, id) == 0 &&
+                    String.Equals(id.ToString(), app.AppId, StringComparison.OrdinalIgnoreCase)) return candidate;
                 size = id.Capacity;
-                if (!String.IsNullOrEmpty(pending.Target) && Native.QueryFullProcessImageName(process, 0, id, ref size) &&
-                    String.Equals(id.ToString(), pending.Target, StringComparison.OrdinalIgnoreCase)) return candidate;
+                if (!String.IsNullOrEmpty(app.Target) && Native.QueryFullProcessImageName(process, 0, id, ref size) &&
+                    String.Equals(id.ToString(), app.Target, StringComparison.OrdinalIgnoreCase)) return candidate;
             } finally { Native.CloseHandle(process); }
         }
         return null;

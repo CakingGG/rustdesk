@@ -955,6 +955,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
             padding: EdgeInsets.symmetric(vertical: 10),
             child: GestureHelp(
               touchMode: gFFI.ffiModel.touchMode,
+              phoneWorkspace: gFFI.ffiModel.pi.isPhoneWorkspace,
               onTouchModeChange: (t) {
                 gFFI.ffiModel.toggleTouchMode();
                 final v = gFFI.ffiModel.touchMode ? 'Y' : 'N';

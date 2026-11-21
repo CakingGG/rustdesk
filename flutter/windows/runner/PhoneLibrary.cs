@@ -16,7 +16,6 @@ internal sealed partial class PhoneWorkspace
     private readonly ListView grid = new ListView();
     private readonly ImageList icons = new ImageList { ImageSize = new Size(40, 40), ColorDepth = ColorDepth.Depth32Bit };
     private readonly List<Entry> visibleApps = new List<Entry>();
-    private readonly Dictionary<string, string> phonetics = new Dictionary<string, string>();
     private Size originalSize;
     private bool captureEnabled;
     private DateTime quitRequested;
@@ -198,12 +197,7 @@ internal sealed partial class PhoneWorkspace
         if (query.Length == 0) return true;
         if (entry.SearchText == null) {
             var title = entry.Name + " " + entry.AppName;
-            string aliases;
-            if (!phonetics.TryGetValue(title, out aliases)) {
-                aliases = Romanize(title);
-                phonetics[title] = aliases;
-            }
-            entry.SearchText = title + " " + aliases;
+            entry.SearchText = title + " " + Romanize(title);
         }
         return entry.SearchText.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0;
     }
@@ -331,7 +325,7 @@ internal sealed partial class PhoneWorkspace
             status.Text = TextFor("Use the application's New Window command", "请使用应用内的新建窗口命令");
             return;
         }
-        SelectApp(launcher);
+        SelectApp(launcher, true);
     }
 
     [DllImport("user32")] private static extern bool PostMessage(IntPtr window, uint msg, IntPtr w, IntPtr l);
@@ -360,9 +354,15 @@ internal sealed partial class PhoneWorkspace
         if (all) {
             quitting = window;
             quitRequested = DateTime.UtcNow;
-            foreach (var entry in Windows())
-                if (entry.Pid == pid && entry.Window != window)
+            string appId = Native.WindowAppId(window);
+            string process = Path.GetFileNameWithoutExtension(Executable(pid)) ?? "";
+            bool sharedHost = String.Equals(process, "ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(process, "explorer", StringComparison.OrdinalIgnoreCase);
+            foreach (var entry in Windows()) {
+                if (entry.Pid == pid && entry.Window != window &&
+                    (String.IsNullOrEmpty(appId) ? !sharedHost : Native.WindowAppId(entry.Window) == appId))
                     PostMessage(entry.Window, 0x10, IntPtr.Zero, IntPtr.Zero);
+            }
         }
         if (!PostMessage(window, 0x10, IntPtr.Zero, IntPtr.Zero)) {
             ShowPicker(true);

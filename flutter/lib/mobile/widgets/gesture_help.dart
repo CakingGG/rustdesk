@@ -40,11 +40,13 @@ class GestureHelp extends StatefulWidget {
   GestureHelp(
       {Key? key,
       required this.touchMode,
+      this.phoneWorkspace = false,
       required this.onTouchModeChange,
       required this.virtualMouseMode,
       this.inputModel})
       : super(key: key);
   final bool touchMode;
+  final bool phoneWorkspace;
   final OnTouchModeChange onTouchModeChange;
   final VirtualMouseMode virtualMouseMode;
   final InputModel? inputModel;
@@ -295,12 +297,14 @@ class _GestureHelpState extends State<GestureHelp> {
                               width,
                               GestureIcons.iconGestureFSwipeRight,
                               translate("One-Finger Move"),
-                              translate("Mouse Drag")),
+                              translate(widget.phoneWorkspace ? "Mouse Wheel" : "Mouse Drag")),
                           GestureInfo(
                               width,
-                              GestureIcons.iconGestureFThreeFingers,
-                              translate("Three-Finger vertically"),
-                              translate("Mouse Wheel")),
+                              widget.phoneWorkspace ? GestureIcons.iconGesturePressHold : GestureIcons.iconGestureFThreeFingers,
+                              widget.phoneWorkspace
+                                  ? '${translate("One-Long Tap")} + ${translate("One-Finger Move")}'
+                                  : translate("Three-Finger vertically"),
+                              translate(widget.phoneWorkspace ? "Mouse Drag" : "Mouse Wheel")),
                           GestureInfo(
                               width,
                               GestureIcons.iconGestureFDrag,

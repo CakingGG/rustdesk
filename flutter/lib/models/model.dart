@@ -117,6 +117,7 @@ class FfiModel with ChangeNotifier {
   bool? _secure;
   bool? _direct;
   bool _touchMode = false;
+  bool _defaultTouchOnPhoneScreen = false;
   late VirtualMouseMode virtualMouseMode;
   Timer? _timer;
   Timer? _restartReconnectDelayTimer;
@@ -158,7 +159,7 @@ class FfiModel with ChangeNotifier {
 
   bool get inputBlocked => _inputBlocked;
 
-  bool get touchMode => _touchMode;
+  bool get touchMode => _touchMode || (_defaultTouchOnPhoneScreen && _pi.isPhoneWorkspace);
 
   bool get isPeerAndroid => _pi.platform == kPeerPlatformAndroid;
   bool get isPeerMobile => isPeerAndroid;
@@ -212,7 +213,8 @@ class FfiModel with ChangeNotifier {
 
   toggleTouchMode() {
     if (!isPeerAndroid) {
-      _touchMode = !_touchMode;
+      _touchMode = !touchMode;
+      _defaultTouchOnPhoneScreen = false;
       notifyListeners();
     }
   }
@@ -1374,6 +1376,7 @@ class FfiModel with ChangeNotifier {
     _pi.sasEnabled = evt['sas_enabled'] == 'true';
     final currentDisplay = int.parse(evt['current_display']);
     _pi.phoneWorkspaceName = null;
+    _defaultTouchOnPhoneScreen = false;
     if (_pi.primaryDisplay == kInvalidDisplayIndex) {
       _pi.primaryDisplay = currentDisplay;
     }
@@ -1406,7 +1409,8 @@ class FfiModel with ChangeNotifier {
       } else {
         final optSession = await bind.sessionGetOption(
             sessionId: sessionId, arg: kOptionTouchMode);
-        _touchMode = optSession != '' || evt['phone_workspace'] == 'true';
+        _touchMode = optSession != '';
+        _defaultTouchOnPhoneScreen = !_touchMode && evt['phone_workspace'] == 'true';
       }
     }
     if (isMobile) {
