@@ -358,6 +358,8 @@ impl TerminalUserToken {
 pub struct Connection {
     inner: ConnInner,
     display_idx: usize,
+    #[cfg(windows)]
+    phone_workspace: Option<virtual_display_manager::phone::Workspace>,
     stream: super::Stream,
     server: super::ServerPtrWeak,
     hash: Hash,
@@ -582,6 +584,8 @@ impl Connection {
             // Defer display enumeration until login succeeds. Monitor login replaces this
             // with the primary index returned with the refreshed display snapshot.
             display_idx: 0,
+            #[cfg(windows)]
+            phone_workspace: None,
             stream,
             server,
             hash,
@@ -2138,6 +2142,8 @@ impl Connection {
         .into();
 
         let mut sub_service = false;
+        #[cfg(windows)]
+        let mut phone_workspace_error = None;
         #[allow(unused_mut)]
         let mut wait_session_id_confirm = false;
         #[cfg(windows)]
@@ -2180,6 +2186,23 @@ impl Connection {
 
             try_activate_screen();
 
+            #[cfg(windows)]
+            if self.is_remote()
+                && self.lr.my_platform == "Android"
+                && self.peer_keyboard_enabled()
+                && !self.options_in_login.as_ref().is_some_and(|o| {
+                    o.disable_keyboard.enum_value() == Ok(BoolOption::Yes)
+                })
+                && !wait_session_id_confirm
+                && self.phone_workspace.is_none()
+            {
+                if let Some(size) = self.lr.phone_display.as_ref() {
+                    match virtual_display_manager::phone::open(size.width, size.height).await {
+                        Ok(workspace) => self.phone_workspace = Some(workspace),
+                        Err(err) => phone_workspace_error = Some(err.to_string()),
+                    }
+                }
+            }
             match super::display_service::update_get_sync_displays_on_login().await {
                 Err(err) => {
                     res.set_error(format!("{}", err));
@@ -2193,6 +2216,22 @@ impl Connection {
                     }
                     // A separate primary lookup here could race with display hot-plug.
                     self.display_idx = primary_display_idx;
+                    #[cfg(windows)]
+                    if let Some(workspace) = self.phone_workspace.as_ref() {
+                        if let Some(index) = displays
+                            .iter()
+                            .position(|d| d.online && workspace.matches(&d.name))
+                        {
+                            self.display_idx = index;
+                            pi.phone_workspace = true;
+                        } else {
+                            phone_workspace_error =
+                                Some("Phone display is unavailable for capture".into());
+                            if let Some(lost) = self.phone_workspace.take() {
+                                lost.close().await;
+                            }
+                        }
+                    }
                     pi.displays = displays;
                     pi.current_display = self.display_idx as _;
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2227,6 +2266,18 @@ impl Connection {
         let mut msg_out = Message::new();
         msg_out.set_login_response(res);
         self.send(msg_out).await;
+        #[cfg(windows)]
+        if let Some(text) = phone_workspace_error {
+            log::warn!("Phone workspace: {}", text);
+            let mut notice = Message::new();
+            notice.set_message_box(MessageBox {
+                msgtype: "nook-nocancel-hasclose".into(),
+                title: "Virtual display".into(),
+                text,
+                ..Default::default()
+            });
+            self.send(notice).await;
+        }
         self.update_scoped_login_options().await;
         if let Some((dir, show_hidden)) = self.file_transfer.clone() {
             self.keyboard = false;
@@ -5420,6 +5471,10 @@ impl Connection {
     }
 
     async fn on_close(&mut self, reason: &str, lock: bool) {
+        #[cfg(windows)]
+        if let Some(workspace) = self.phone_workspace.take() {
+            workspace.close().await;
+        }
         if self.closed {
             return;
         }

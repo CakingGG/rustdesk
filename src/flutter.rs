@@ -932,6 +932,7 @@ impl InvokeUiSession for FlutterHandler {
                 ("version", &pi.version),
                 ("features", &features),
                 ("current_display", &pi.current_display.to_string()),
+                ("phone_workspace", &pi.phone_workspace.to_string()),
                 ("resolutions", &resolutions),
                 ("platform_additions", &pi.platform_additions),
             ],

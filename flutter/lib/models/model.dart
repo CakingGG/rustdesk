@@ -1437,6 +1437,7 @@ class FfiModel with ChangeNotifier {
       // New monitor windows keep their selection in currentDisplay.
       final last = lastUserDisplay ?? _pi.currentDisplay;
       pendingMonitorRestore = (!isCache &&
+              evt['phone_workspace'] != 'true' &&
               last != currentDisplay &&
               bind.sessionGetUseAllMyDisplaysForTheRemoteSession(
                       sessionId: sessionId) !=

@@ -88,6 +88,21 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
+# Windows 10/11 includes the .NET Framework compiler and WinForms runtime.
+find_program(PHONE_CSC csc.exe PATHS
+  "$ENV{SystemRoot}/Microsoft.NET/Framework64/v4.0.30319"
+  "$ENV{SystemRoot}/Microsoft.NET/Framework/v4.0.30319" NO_DEFAULT_PATH REQUIRED)
+set(PHONE_PICKER "${CMAKE_CURRENT_BINARY_DIR}/rustdesk-phone-workspace.exe")
+set(PHONE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runner/PhoneWorkspace.cs")
+add_custom_command(OUTPUT "${PHONE_PICKER}"
+  COMMAND "${PHONE_CSC}" /nologo /target:winexe /optimize+ /utf8output
+          /reference:System.Windows.Forms.dll /reference:System.Drawing.dll
+          "/out:${PHONE_PICKER}" "${PHONE_SOURCE}"
+  DEPENDS "${PHONE_SOURCE}" VERBATIM)
+add_custom_target(phone_workspace_picker DEPENDS "${PHONE_PICKER}")
+add_dependencies(${BINARY_NAME} phone_workspace_picker)
+install(FILES "${PHONE_PICKER}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 

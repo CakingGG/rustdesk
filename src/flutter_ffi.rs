@@ -3081,6 +3081,16 @@ pub mod server_side {
     use crate::start_server;
 
     #[no_mangle]
+    pub extern "system" fn Java_ffi_FFI_setPhoneDisplay(
+        _env: JNIEnv,
+        _class: JClass,
+        width: i32,
+        height: i32,
+    ) {
+        *crate::client::PHONE_DISPLAY.lock().unwrap() = (width, height);
+    }
+
+    #[no_mangle]
     pub unsafe extern "system" fn Java_ffi_FFI_startServer(
         env: JNIEnv,
         _class: JClass,

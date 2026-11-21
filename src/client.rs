@@ -25,6 +25,9 @@ use std::{
 };
 use uuid::Uuid;
 
+#[cfg(target_os = "android")]
+pub(crate) static PHONE_DISPLAY: Mutex<(i32, i32)> = Mutex::new((0, 0));
+
 use crate::{
     check_port,
     common::input::{MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_TYPE_DOWN, MOUSE_TYPE_UP},
@@ -3870,6 +3873,18 @@ impl LoginConfigHandler {
             avatar,
             ..Default::default()
         };
+        #[cfg(target_os = "android")]
+        if self.conn_type == ConnType::DEFAULT_CONN {
+            let (width, height) = *PHONE_DISPLAY.lock().unwrap();
+            if width > 0 && height > 0 {
+                lr.phone_display = Some(base::message_proto::Resolution {
+                    width,
+                    height,
+                    ..Default::default()
+                })
+                .into();
+            }
+        }
         if self.skips_saved_password() {
             lr.password.clear();
         }

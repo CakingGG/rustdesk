@@ -7,7 +7,9 @@ fn build_windows() {
         build.cpp(true).std("c++17").define("RUSTDESK_SCITER", None);
         println!("cargo:rerun-if-changed=flutter/windows/runner/service_control.h");
     }
-    build.file(file).file(file2).compile("windows");
+    let phone_workspace = "src/platform/phone_workspace.cc";
+    build.file(file).file(file2).file(phone_workspace).compile("windows");
+    println!("cargo:rerun-if-changed={}", phone_workspace);
     println!("cargo:rustc-link-lib=WtsApi32");
     println!("cargo:rerun-if-changed={}", file);
     println!("cargo:rerun-if-changed={}", file2);

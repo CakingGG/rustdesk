@@ -1840,7 +1840,9 @@ impl<T: InvokeUiSession> Interface for Session<T> {
                 return;
             }
             if !self.is_view_camera() {
-                self.try_change_init_resolution(pi.current_display);
+                if !pi.phone_workspace {
+                    self.try_change_init_resolution(pi.current_display);
+                }
                 let p = self.lc.read().unwrap().should_auto_login();
                 if !p.is_empty() {
                     crate::client::auto_login(p, &pi, self.clone());

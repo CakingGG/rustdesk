@@ -1,6 +1,8 @@
 use base::platform::windows::is_windows_version_or_greater;
 use hbb_common::{bail, ResultType};
 
+pub(crate) mod phone;
+
 // This string is defined here.
 //  https://github.com/rustdesk-org/RustDeskIddDriver/blob/b370aad3f50028b039aad211df60c8051c4a64d6/RustDeskIddDriver/RustDeskIddDriver.inf#LL73C1-L73C40
 pub const RUSTDESK_IDD_DEVICE_STRING: &'static str = "RustDeskIddDriver Device\0";
@@ -497,7 +499,7 @@ pub mod amyuni_idd {
     // If the driver is installed by "deviceinstaller64.exe", the driver will be installed asynchronously.
     // The caller must wait some time before using the driver.
     // Returns whether this call started driver installation.
-    fn check_install_driver(is_async: &mut bool) -> ResultType<bool> {
+    pub(super) fn check_install_driver(is_async: &mut bool) -> ResultType<bool> {
         let _l = LOCK.lock().unwrap();
         let drivers = windows::get_display_drivers();
         if drivers
@@ -544,6 +546,17 @@ pub mod amyuni_idd {
 
     #[inline]
     fn plug_monitor_(
+        add: bool,
+        wait_timeout: Option<Duration>,
+    ) -> Result<(), win_device::DeviceError> {
+        let _guard = super::phone::DRIVER_GATE.lock().unwrap();
+        if super::phone::in_use() {
+            return Err(win_device::DeviceError::Raw("Phone workspace is active".into()));
+        }
+        set_monitor_attached(add, wait_timeout)
+    }
+
+    pub(super) fn set_monitor_attached(
         add: bool,
         wait_timeout: Option<Duration>,
     ) -> Result<(), win_device::DeviceError> {
@@ -624,6 +637,9 @@ pub mod amyuni_idd {
     ) {
         for _ in 0..10 {
             std::thread::sleep(Duration::from_millis(300));
+            if super::phone::in_use() {
+                return;
+            }
             if let Ok(reg_connectivity_new) = reg_display_settings::read_reg_connectivity() {
                 if reg_connectivity_new.len() != old_connectivity_len {
                     for name in
@@ -825,6 +841,9 @@ pub mod amyuni_idd {
     pub fn prepare_privacy_monitor(cancelled: impl Fn() -> bool) -> ResultType<Option<u32>> {
         static PREPARATION_LOCK: Mutex<()> = Mutex::new(());
         let _preparation = lock_privacy_preparation(&PREPARATION_LOCK, &cancelled)?;
+        if super::phone::in_use() {
+            bail!("Phone workspace is active");
+        }
         if cancelled() {
             bail!("Privacy mode preparation cancelled.");
         }

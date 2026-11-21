@@ -76,5 +76,8 @@ pub mod privacy_mode;
 
 #[cfg(windows)]
 pub mod virtual_display_manager;
+#[cfg(any(windows, test))]
+#[path = "virtual_display_manager/phone_mode.rs"]
+mod phone_mode;
 
 mod kcp_stream;

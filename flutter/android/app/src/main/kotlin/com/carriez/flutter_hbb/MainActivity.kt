@@ -102,6 +102,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        updatePhoneDisplay()
         val inputPer = InputService.isOpen
         activity.runOnUiThread {
             flutterMethodChannel?.invokeMethod(
@@ -243,6 +244,16 @@ class MainActivity : FlutterActivity() {
         if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION && resultCode == RES_FAILED) {
             flutterMethodChannel?.invokeMethod("on_media_projection_canceled", null)
         }
+    }
+
+    private fun updatePhoneDisplay() {
+        val (width, height) = getScreenSize(windowManager)
+        FFI.setPhoneDisplay(width, height)
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updatePhoneDisplay()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
