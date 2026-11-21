@@ -30,10 +30,12 @@ class _Cursor extends Fake implements CursorModel {
 class _Input extends Fake implements InputModel {
   final clicks = <MouseButtons>[];
   final pressed = <MouseButtons>{};
+  final downs = <MouseButtons>[];
   @override
   Future<void> tap(MouseButtons b) async => clicks.add(b);
   @override
   Future<void> tapDown(MouseButtons b) async {
+    downs.add(b);
     pressed.add(b);
   }
 
@@ -98,6 +100,31 @@ void main() {
     final full = await drag(1);
     expect(full, greaterThanOrEqualTo(120));
     expect(await drag(.5), closeTo(full * 2, 1));
+    expect(session.inputModel.clicks, isEmpty);
+  });
+
+  testWidgets(
+      'a slow vertical swipe scrolls in either direction without selecting text',
+      (tester) async {
+    final wheel = _Wheel();
+    platformFFI.setBindingForTesting(wheel);
+    final session = _Session();
+    session.ffiModel.pi
+      ..phoneWorkspaceName = 'phone'
+      ..displays.add(Display()..name = 'phone');
+    await tester.pumpWidget(PhoneWorkspaceGestures(
+        ffi: session, child: const ColoredBox(color: Color(0xff000000))));
+    final center = tester.getCenter(find.byType(PhoneWorkspaceGestures));
+    for (final distance in [-60.0, 60.0]) {
+      wheel.distance = 0;
+      final finger = await tester.startGesture(center);
+      await tester.pump(const Duration(milliseconds: 600));
+      await finger.moveBy(Offset(3, distance));
+      await finger.up();
+      await tester.pump();
+      expect(wheel.distance, closeTo(distance * 1.2, 1));
+    }
+    expect(session.inputModel.downs, isEmpty);
     expect(session.inputModel.clicks, isEmpty);
   });
 

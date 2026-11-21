@@ -12,6 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common.dart';
+import '../../common/phone_workspace_build.dart';
+import '../../common/widgets/phone_workspace_update.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import '../../consts.dart';
@@ -647,7 +649,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
           gFFI.invokeMethod(AndroidChannel.kSetStartOnBootOpt, toValue);
         }));
 
-    if (!bind.isCustomClient()) {
+    if (phoneWorkspaceBuild == 0 && !bind.isCustomClient()) {
       enhancementsTiles.add(
         SettingsTile.switchTile(
           initialValue: _checkUpdateOnStartup,
@@ -1072,6 +1074,13 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                       )),
                 ),
                 leading: Icon(Icons.info)),
+            if (isAndroid && phoneWorkspaceBuild > 0)
+              SettingsTile(
+                leading: const Icon(Icons.system_update),
+                title: Text(translate('Check for updates')),
+                value: Text('#$phoneWorkspaceBuild'),
+                onPressed: checkPhoneWorkspaceUpdate,
+              ),
             SettingsTile(
                 title: Text(translate("Build Date")),
                 value: Padding(

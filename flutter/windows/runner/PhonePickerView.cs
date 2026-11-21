@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -96,8 +95,7 @@ internal sealed partial class PhoneWorkspace
         // Work in phone-sized logical units even when the video is 864 or 1080 pixels wide.
         float scale = Math.Max(0.65f, Math.Min(area.Width, area.Height) / 390f);
         if (!expanded) {
-            var screen = TargetScreen();
-            returnHandle.Place(screen == null ? area : screen.Bounds, scale);
+            returnHandle.Place(area, scale);
             Hide();
             return;
         }
@@ -287,50 +285,36 @@ internal sealed partial class PhoneWorkspace
         path.CloseFigure(); return path;
     }
 
-    // A layered window can expose a large hit target without obscuring the application.
     private sealed class ReturnHandle : Form
     {
-        [StructLayout(LayoutKind.Sequential, Pack=1)]
-        private struct Blend { public byte Op, Flags, Alpha, Format; }
-        [DllImport("user32", SetLastError=true)] private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr dc,
-            ref Point pos, ref Size size, IntPtr source, ref Point origin, int key, ref Blend blend, int flags);
-        [DllImport("gdi32")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);
-        [DllImport("gdi32")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
-        [DllImport("gdi32")] private static extern bool DeleteDC(IntPtr dc);
         public ReturnHandle()
         {
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
             StartPosition = FormStartPosition.Manual;
+            BackColor = Color.FromArgb(28, 67, 124);
+            ForeColor = Color.White;
+            Cursor = Cursors.Hand;
+            DoubleBuffered = true;
             AccessibleName = TextFor("Switch application", "切换应用");
         }
         protected override bool ShowWithoutActivation { get { return true; } }
         protected override CreateParams CreateParams {
-            get { var cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x08000000 | 0x80; return cp; }
+            get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80; return cp; }
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using (var font = new Font(SystemFonts.MessageBoxFont.FontFamily, ClientSize.Height * 0.34f,
+                       FontStyle.Bold, GraphicsUnit.Pixel))
+                TextRenderer.DrawText(e.Graphics, AccessibleName, font, ClientRectangle, ForeColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
         }
         public void Place(Rectangle area, float scale)
         {
-            var size = new Size((int)(128*scale), (int)(44*scale));
-            var pos = new Point(area.Left + (area.Width-size.Width)/2, area.Bottom-size.Height);
-            using (var bmp = new Bitmap(size.Width,size.Height,PixelFormat.Format32bppPArgb)) {
-                using (var g = Graphics.FromImage(bmp)) {
-                    g.Clear(Color.FromArgb(1,0,0,0));
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    int w = (int)(86*scale), h = Math.Max(4,(int)(5*scale));
-                    var r = new Rectangle((size.Width-w)/2,size.Height-h-(int)(6*scale),w,h);
-                    using (var path = Rounded(r,h/2)) {
-                        g.FillPath(Brushes.White,path);
-                        using (var pen = new Pen(Color.FromArgb(160,40,40,40),Math.Max(1,scale))) g.DrawPath(pen,path);
-                    }
-                }
-                var dc = CreateCompatibleDC(IntPtr.Zero);
-                var bits = bmp.GetHbitmap(Color.FromArgb(0));
-                var old = SelectObject(dc,bits);
-                try {
-                    var origin = Point.Empty; var blend = new Blend { Alpha = 255, Format = 1 };
-                    if (!UpdateLayeredWindow(Handle,IntPtr.Zero,ref pos,ref size,dc,ref origin,0,ref blend,2))
-                        throw new System.ComponentModel.Win32Exception();
-                } finally { SelectObject(dc,old); DeleteObject(bits); DeleteDC(dc); }
-            }
+            var size = new Size((int)(144 * scale), (int)(44 * scale));
+            var inset = (int)(8 * scale);
+            Bounds = new Rectangle(area.Right - size.Width - inset, area.Bottom - size.Height - inset,
+                size.Width, size.Height);
             if (!Visible) Show();
         }
     }

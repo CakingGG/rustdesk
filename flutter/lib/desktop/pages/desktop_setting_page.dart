@@ -26,6 +26,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
+import '../../common/phone_workspace_build.dart';
+import '../../common/widgets/phone_workspace_update.dart';
 import '../../common/widgets/login.dart';
 
 const double _kTabWidth = 200;
@@ -593,14 +595,14 @@ class _GeneralState extends State<_General> {
             ),
           ),
       ],
-      if (!isWeb && !bind.isCustomClient())
+      if (phoneWorkspaceBuild == 0 && !isWeb && !bind.isCustomClient())
         _OptionCheckBox(
           context,
           'Check for software update on startup',
           kOptionEnableCheckUpdate,
           isServer: false,
         ),
-      if (showAutoUpdate)
+      if (phoneWorkspaceBuild == 0 && showAutoUpdate)
         _OptionCheckBox(
           context,
           'Auto update',
@@ -2605,6 +2607,11 @@ class _AboutState extends State<_About> {
               SelectionArea(
                   child: Text('${translate('Version')}: $version')
                       .marginSymmetric(vertical: 4.0)),
+              if (isWindows && phoneWorkspaceBuild > 0)
+                TextButton.icon(
+                    icon: const Icon(Icons.system_update_alt),
+                    onPressed: () => checkPhoneWorkspaceUpdate(context),
+                    label: Text("${translate('Check for updates')}  #$phoneWorkspaceBuild")),
               SelectionArea(
                   child: Text('${translate('Build Date')}: $buildDate')
                       .marginSymmetric(vertical: 4.0)),

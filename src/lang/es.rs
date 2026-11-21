@@ -827,5 +827,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Request approval", "Solicitar aprobación"),
         ("Forever", "Para siempre"),
         ("username-login-disabled-oidc-unavailable", "El inicio de sesión con nombre de usuario y contraseña está deshabilitado y no hay métodos de inicio de sesión OIDC disponibles."),
+        ("Check for updates", "Buscar actualizaciones"),
+        ("You are up to date", "Tienes la versión más reciente"),
+        ("Allow this app to install updates, then tap Install again.", "Permite que esta aplicación instale actualizaciones y vuelve a pulsar «Instalar»."),
     ].iter().cloned().collect();
 }

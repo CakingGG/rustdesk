@@ -29,6 +29,7 @@ class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
   bool _pinching = false;
   double _scale = 1;
   Offset? _hold;
+  Offset? _heldScrollPoint;
   bool _selecting = false;
   Future<void> _selection = Future.value();
 
@@ -80,11 +81,25 @@ class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
     if (_fling.isDone(t)) _ticker.stop();
   }
 
-  void _dragSelection(LongPressMoveUpdateDetails event) {
+  void _moveAfterHold(LongPressMoveUpdateDetails event) {
     final origin = _hold;
     if (origin == null || !_inside(event.localPosition)) return;
+    final offset = event.localPosition - origin;
+    if (!_selecting && _heldScrollPoint == null) {
+      if (offset.distance < kTouchSlop) return;
+      if (offset.dy.abs() > offset.dx.abs()) {
+        widget.ffi.cursorModel.move(origin.dx, origin.dy);
+        _remainder = Offset.zero;
+        _heldScrollPoint = origin;
+      }
+    }
+    final previous = _heldScrollPoint;
+    if (previous != null) {
+      _scroll(event.localPosition - previous);
+      _heldScrollPoint = event.localPosition;
+      return;
+    }
     final first = !_selecting;
-    if (first && (event.localPosition - origin).distance < kTouchSlop) return;
     _selecting = true;
     final ffi = widget.ffi;
     _selection = _selection.then((_) async {
@@ -108,6 +123,7 @@ class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
     }
     _selecting = false;
     _hold = null;
+    _heldScrollPoint = null;
   }
 
   @override
@@ -135,10 +151,12 @@ class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
           onLongPressStart: (d) {
             _hold = _inside(d.localPosition) ? d.localPosition : null;
           },
-          onLongPressMoveUpdate: _dragSelection,
+          onLongPressMoveUpdate: _moveAfterHold,
           onLongPressEnd: (_) {
             final point = _hold;
-            if (!_selecting && point != null) _tap(point, MouseButtons.right);
+            if (!_selecting && _heldScrollPoint == null && point != null) {
+              _tap(point, MouseButtons.right);
+            }
             _endSelection();
           },
           onScaleStart: (d) {

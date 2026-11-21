@@ -17,6 +17,7 @@ env:
   VCPKG_COMMIT_ID: 9e593bb18ea69cc5095e012465dcd675a822ed0d
   VCPKG_CMAKE_VERSION: 4.3.0
   VERSION: 1.5.3
+  RUSTDESK_PHONE_WORKSPACE_BUILD: ${{ github.run_number }}
   NDK_VERSION: r28c
 jobs:
   generate-bridge:
@@ -92,6 +93,8 @@ jobs:
       run: |
         ~/.cargo/bin/flutter_rust_bridge_codegen --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart --c-output ./flutter/macos/Runner/bridge_generated.h
         cp ./flutter/macos/Runner/bridge_generated.h ./flutter/ios/Runner/bridge_generated.h
+    - name: Stamp the phone workspace update channel
+      run: echo "const int phoneWorkspaceBuild = $GITHUB_RUN_NUMBER;" > flutter/lib/common/phone_workspace_build.dart
     - name: Upload Artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
@@ -101,6 +104,7 @@ jobs:
           ./src/bridge_generated.io.rs
           ./flutter/lib/generated_bridge.dart
           ./flutter/lib/generated_bridge.freezed.dart
+          ./flutter/lib/common/phone_workspace_build.dart
           ./flutter/macos/Runner/bridge_generated.h
           ./flutter/ios/Runner/bridge_generated.h
     env:
@@ -517,6 +521,7 @@ jobs:
         sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
         # Use a separate install ID so the trial can coexist with the official client.
         sed -i 's/applicationId "com.carriez.flutter_hbb"/applicationId "com.carriez.flutter_hbb.phoneworkspace"/' ./flutter/android/app/build.gradle
+        cp -R flutter/android/app/src/phoneWorkspace flutter/android/app/src/release
         # Sign the finished APK separately so Gradle never receives the test key.
         sed -i 's/signingConfig signingConfigs.release/signingConfig null/' ./flutter/android/app/build.gradle
         build_number=$((1000 + GITHUB_RUN_NUMBER))
@@ -527,7 +532,7 @@ jobs:
             cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
             # build flutter
             pushd flutter
-            flutter test test/phone_workspace_gestures_test.dart
+            flutter test test/phone_workspace_gestures_test.dart test/phone_workspace_release_test.dart
             flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi --build-number "$build_number"
             mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
           ;;
@@ -588,6 +593,7 @@ jobs:
         fingerprints=$(awk '/certificate SHA-256 digest:/ {print tolower($NF)}' "$RUNNER_TEMP/phone-signer.txt" | sort -u)
         test "$fingerprints" = "$cert_sha256"
         "$tools/aapt" dump badging "$apk" | grep -F "name='com.carriez.flutter_hbb.phoneworkspace'"
+        "$tools/aapt" dump permissions "$apk" | grep -F 'android.permission.REQUEST_INSTALL_PACKAGES'
         unzip -p "$apk" lib/arm64-v8a/librustdesk.so > "$RUNNER_TEMP/phone-library.so"
         readelf --wide --dyn-syms "$RUNNER_TEMP/phone-library.so" | grep -F Java_ffi_FFI_setPhoneDisplay
     - name: Upload phone-workspace-android-arm64
@@ -596,3 +602,37 @@ jobs:
         name: phone-workspace-android-arm64
         path: signed-apk/*.apk
         if-no-files-found: error
+  publish:
+    if: github.repository == 'CakingGG/rustdesk'
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        pattern: phone-workspace-*
+        merge-multiple: true
+        path: installers
+    - name: Publish the two verified installers as a prerelease
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        cd installers
+        mv -- *.apk phone-workspace-arm64.apk
+        mv -- *.msi phone-workspace-x64.msi
+        tag="phone-workspace-$GITHUB_RUN_NUMBER"
+        if ! gh release view "$tag" >/dev/null 2>&1; then
+          gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease \
+            --title "Phone workspace $VERSION (build $GITHUB_RUN_NUMBER)" \
+            --notes "Android ARM64 and Windows x64 test installers for commit $GITHUB_SHA."
+        fi
+        if [[ $(gh release view "$tag" --json isDraft --jq .isDraft) == true ]]; then
+          gh release upload "$tag" phone-workspace-arm64.apk phone-workspace-x64.msi --clobber
+          gh release edit "$tag" --draft=false --prerelease --latest=false
+        fi
+        gh api "repos/$GH_REPO/releases/tags/$tag" | jq -e '
+          [.assets[] | select(.state == "uploaded" and (.digest | test("^sha256:[0-9a-f]{64}$"))) | .name] |
+          sort == ["phone-workspace-arm64.apk", "phone-workspace-x64.msi"]'

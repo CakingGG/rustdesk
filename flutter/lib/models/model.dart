@@ -1411,8 +1411,8 @@ class FfiModel with ChangeNotifier {
         final optSession = await bind.sessionGetOption(
             sessionId: sessionId, arg: kOptionTouchMode);
         _touchMode = optSession != '';
-        _defaultTouchOnPhoneScreen = !_touchMode && evt['phone_workspace'] == 'true';
       }
+      _defaultTouchOnPhoneScreen = evt['phone_workspace'] == 'true';
     }
     if (isMobile) {
       virtualMouseMode.loadOptions();

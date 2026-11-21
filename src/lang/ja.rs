@@ -827,5 +827,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Request approval", "承認を要求"),
         ("Forever", "無期限"),
         ("username-login-disabled-oidc-unavailable", "ユーザー名とパスワードによるログインは無効になっており、利用可能な OIDC ログイン方法がありません。"),
+        ("Check for updates", "アップデートを確認"),
+        ("You are up to date", "最新バージョンです"),
+        ("Allow this app to install updates, then tap Install again.", "このアプリによる更新のインストールを許可してから、もう一度「インストール」をタップしてください。"),
     ].iter().cloned().collect();
 }
