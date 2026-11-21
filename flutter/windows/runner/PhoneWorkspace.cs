@@ -15,11 +15,8 @@ internal sealed partial class PhoneWorkspace : Form
     private readonly string display;
     private readonly string stopEvent;
     private readonly Button appsButton = new Button();
-    private readonly ListBox list = new ListBox();
     private readonly Label status = new Label();
     private readonly TextBox search = new TextBox();
-    private readonly TabControl sections = new TabControl();
-    private readonly Button restore = new Button();
     private List<Entry> running = new List<Entry>();
     private IntPtr currentWindow;
     private Size lastArea;
@@ -62,56 +59,10 @@ internal sealed partial class PhoneWorkspace : Form
         display = device;
         stopEvent = stop;
         Text = "RustDesk";
-        Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 14);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
         TopMost = true;
-        appsButton.Text = TextFor("Apps", "应用");
-        appsButton.Height = 48;
-        appsButton.Dock = DockStyle.Bottom;
-        appsButton.Click += delegate {
-            if (expanded && currentWindow == IntPtr.Zero) return;
-            ShowPicker(!expanded);
-            if (!expanded) Native.SetForegroundWindow(currentWindow);
-        };
-        status.Height = 44;
-        status.Dock = DockStyle.Top;
-        list.Dock = DockStyle.Fill;
-        list.IntegralHeight = false;
-        list.ItemHeight = 36;
-        list.MouseClick += delegate(object sender, MouseEventArgs e) {
-            int index = list.IndexFromPoint(e.Location);
-            if (index != ListBox.NoMatches) SelectApp((Entry)list.Items[index]);
-        };
-        list.KeyDown += delegate(object sender, KeyEventArgs e) {
-            if (e.KeyCode == Keys.Enter && list.SelectedItem != null) SelectApp((Entry)list.SelectedItem);
-        };
-        var runningPage = new TabPage(TextFor("Running windows", "运行中的窗口"));
-        var appsPage = new TabPage(TextFor("All apps", "全部应用"));
-        sections.TabPages.Add(runningPage);
-        sections.TabPages.Add(appsPage);
-        sections.Dock = DockStyle.Fill;
-        runningPage.Controls.Add(list);
-        sections.SelectedIndexChanged += delegate {
-            if (sections.SelectedTab == null) return;
-            RefreshEntries();
-        };
-        search.Dock = DockStyle.Top;
-        search.AccessibleName = TextFor("Search apps or window titles", "搜索应用或窗口标题");
-        search.TextChanged += delegate { RefreshEntries(); };
-        restore.Dock = DockStyle.Bottom;
-        restore.Height = 44;
-        restore.Text = TextFor("Return window to original screen", "将窗口还原到原屏幕");
-        restore.Click += delegate {
-            RestoreCurrent();
-            ShowPicker(true);
-        };
-        Controls.Add(sections);
-        Controls.Add(search);
-        Controls.Add(status);
-        Controls.Add(restore);
-        Controls.Add(appsButton);
         InitializeLibrary();
         Shown += delegate { ShowPicker(true); };
         FormClosed += delegate { timer.Stop(); RestoreWindows(); ReturnOtherWindows(); };
@@ -160,42 +111,18 @@ internal sealed partial class PhoneWorkspace : Form
         var screen = TargetScreen();
         if (screen == null) { Close(); return; }
         expanded = open;
-        sections.Visible = search.Visible = status.Visible = open;
-        restore.Visible = open && currentWindow != IntPtr.Zero;
-        LayoutLibrary(screen.WorkingArea);
-        appsButton.Text = open && currentWindow != IntPtr.Zero
-            ? TextFor("Back to window", "返回窗口") : TextFor("Apps", "应用");
-        if (!open) return;
+        if (!open) { LayoutLibrary(screen.WorkingArea); return; }
         pending = null;
         beforeLaunch = null;
-        status.Text = TextFor("Search apps or window titles", "搜索应用或窗口标题");
+        status.Text = "";
         running = Windows();
         foreach (var entry in running) {
             entry.Target = Executable(entry.Pid);
             entry.AppName = System.IO.Path.GetFileNameWithoutExtension(entry.Target) ?? entry.Name;
         }
         PopulateGroups();
-        RefreshEntries();
+        LayoutLibrary(screen.WorkingArea);
         Activate();
-    }
-
-    private void RefreshEntries()
-    {
-        bool all = sections.SelectedIndex == 1;
-        if (all && installed.Count == 0) ReadApps();
-        string query = search.Text.Trim();
-        if (all) {
-            FilterApps(query);
-            return;
-        }
-        list.BeginUpdate();
-        try {
-            list.Items.Clear();
-            foreach (var entry in running)
-                if ((!groups.Visible || groups.SelectedIndex <= 0 || entry.AppName == (string)groups.SelectedItem) &&
-                    MatchesSearch(entry, query))
-                    list.Items.Add(entry);
-        } finally { list.EndUpdate(); }
     }
 
     private void ReadApps()

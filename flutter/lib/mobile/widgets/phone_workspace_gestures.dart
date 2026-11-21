@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/model.dart';
@@ -21,8 +20,9 @@ class PhoneWorkspaceGestures extends StatefulWidget {
 class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_coast);
-  late FrictionSimulation _horizontal, _vertical;
-  Offset _last = Offset.zero;
+  late ClampingScrollSimulation _fling;
+  Offset _flingDirection = Offset.zero;
+  double _lastDistance = 0;
   Offset _remainder = Offset.zero;
   bool _stopTap = false;
   bool _scrolling = false;
@@ -50,7 +50,12 @@ class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
 
   void _scroll(Offset delta) {
     if (!_enabled) return;
-    _remainder += delta;
+    final scale = widget.ffi.canvasModel.scale;
+    if (!scale.isFinite || scale <= 0) return;
+    // Win32 high-resolution wheel units: 120 per notch. Chromium's default
+    // notch scrolls 100 pixels at 100% scaling. Convert the phone viewport
+    // to remote pixels first, just as we do when positioning the cursor.
+    _remainder += delta * (120 / 100 / scale);
     final x = _remainder.dx.truncate(), y = _remainder.dy.truncate();
     _remainder -= Offset(x.toDouble(), y.toDouble());
     if (x == 0 && y == 0) return;
@@ -65,14 +70,14 @@ class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
 
   void _coast(Duration elapsed) {
     final t = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
-    if (!_enabled ||
-        (_horizontal.dx(t).abs() < 10 && _vertical.dx(t).abs() < 10)) {
+    if (!_enabled) {
       _ticker.stop();
       return;
     }
-    final next = Offset(_horizontal.x(t), _vertical.x(t));
-    _scroll(next - _last);
-    _last = next;
+    final distance = _fling.x(t);
+    _scroll(_flingDirection * (distance - _lastDistance));
+    _lastDistance = distance;
+    if (_fling.isDone(t)) _ticker.stop();
   }
 
   void _dragSelection(LongPressMoveUpdateDetails event) {
@@ -165,11 +170,11 @@ class _PhoneWorkspaceGesturesState extends State<PhoneWorkspaceGestures>
             if (_scrolling &&
                 !_pinching &&
                 velocity.distance > kMinFlingVelocity) {
-              _horizontal = FrictionSimulation(
-                  0.01, 0, velocity.dx.clamp(-4000, 4000).toDouble());
-              _vertical = FrictionSimulation(
-                  0.01, 0, velocity.dy.clamp(-4000, 4000).toDouble());
-              _last = Offset.zero;
+              _flingDirection = velocity / velocity.distance;
+              _fling = ClampingScrollSimulation(
+                  position: 0,
+                  velocity: velocity.distance.clamp(0, kMaxFlingVelocity).toDouble());
+              _lastDistance = 0;
               _ticker.start();
             }
             _scrolling = false;

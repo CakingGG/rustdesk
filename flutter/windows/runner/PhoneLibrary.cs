@@ -10,12 +10,7 @@ using Microsoft.Win32;
 internal sealed partial class PhoneWorkspace
 {
     private readonly ListBox groups = new ListBox();
-    private readonly FlowLayoutPanel actions = new FlowLayoutPanel();
-    private readonly Button tools = new Button();
     private readonly ContextMenuStrip menu = new ContextMenuStrip();
-    private readonly ListView grid = new ListView();
-    private readonly ImageList icons = new ImageList { ImageSize = new Size(40, 40), ColorDepth = ColorDepth.Depth32Bit };
-    private readonly List<Entry> visibleApps = new List<Entry>();
     private Size originalSize;
     private bool captureEnabled;
     private DateTime quitRequested;
@@ -27,53 +22,7 @@ internal sealed partial class PhoneWorkspace
         RecoverWindows();
         originalSize = TargetScreen() == null ? Size.Empty : TargetScreen().Bounds.Size;
         captureEnabled = Equals(Registry.GetValue(Preferences, "Capture", 0), 1);
-        groups.Dock = DockStyle.Left;
-        groups.Width = 190;
-        groups.SelectedIndexChanged += delegate { RefreshEntries(); };
-        sections.TabPages[0].Controls.Add(groups);
-        grid.Dock = DockStyle.Fill;
-        grid.View = View.LargeIcon;
-        grid.MultiSelect = false;
-        grid.VirtualMode = true;
-        grid.LargeImageList = icons;
-        grid.RetrieveVirtualItem += delegate(object sender, RetrieveVirtualItemEventArgs e) {
-            var entry = visibleApps[e.ItemIndex];
-            string key = entry.ShellPath ?? entry.Name;
-            if (!icons.Images.ContainsKey(key)) {
-                using (var icon = AppImage(entry)) icons.Images.Add(key, icon);
-            }
-            e.Item = new ListViewItem(entry.Name, key);
-        };
-        grid.MouseClick += delegate(object sender, MouseEventArgs e) {
-            var item = grid.GetItemAt(e.X, e.Y);
-            if (item != null) SelectApp(visibleApps[item.Index]);
-        };
-        grid.KeyDown += delegate(object sender, KeyEventArgs e) {
-            if (e.KeyCode == Keys.Enter && grid.SelectedIndices.Count == 1)
-                SelectApp(visibleApps[grid.SelectedIndices[0]]);
-        };
-        sections.TabPages[1].Controls.Add(grid);
-        Disposed += delegate { icons.Dispose(); menu.Dispose(); };
-        actions.AutoSize = true;
-        actions.Dock = DockStyle.Bottom;
-        tools.AutoSize = true;
-        tools.Text = TextFor("Window actions", "窗口操作");
-        tools.Click += delegate { BuildMenu(); menu.Show(tools, new Point(0, 0), ToolStripDropDownDirection.AboveRight); };
-        actions.Controls.Add(tools);
-        Controls.Add(actions);
-        actions.BringToFront();
-        sections.BringToFront();
-    }
-
-    private void FilterApps(string query)
-    {
-        grid.BeginUpdate();
-        try {
-            grid.VirtualListSize = 0;
-            visibleApps.Clear();
-            foreach (var e in installed) if (MatchesSearch(e, query)) visibleApps.Add(e);
-            grid.VirtualListSize = visibleApps.Count;
-        } finally { grid.EndUpdate(); }
+        InitializePickerView();
     }
 
     [ComImport, Guid("BCC18B79-BA16-442F-80C4-8A59C30C463B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -84,21 +33,68 @@ internal sealed partial class PhoneWorkspace
     private static extern int SHCreateItemFromParsingName(string path, IntPtr context,
         ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory item);
     [DllImport("gdi32")] private static extern bool DeleteObject(IntPtr obj);
+    [DllImport("user32", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr wParam,
+        IntPtr lParam, uint flags, uint timeout, out IntPtr result);
     private static Bitmap AppImage(Entry entry)
     {
+        IntPtr iconHandle;
+        if (entry.Window != IntPtr.Zero && SendMessageTimeout(entry.Window, 0x7f, new IntPtr(1),
+                IntPtr.Zero, 2, 30, out iconHandle) != IntPtr.Zero && iconHandle != IntPtr.Zero) {
+            using (var icon = Icon.FromHandle(iconHandle)) return icon.ToBitmap();
+        }
         var iid = typeof(IShellItemImageFactory).GUID;
         IShellItemImageFactory item;
         string path = String.IsNullOrEmpty(entry.AppId) ? entry.Target : @"shell:AppsFolder\" + entry.AppId;
         if (!String.IsNullOrEmpty(path) && SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out item) == 0) {
             try {
                 IntPtr bitmap;
-                if (item.GetImage(new Size(40, 40), 4, out bitmap) == 0) {
-                    try { return Image.FromHbitmap(bitmap); }
+                if (item.GetImage(new Size(96, 96), 4, out bitmap) == 0) {
+                    try { return ShellBitmap(bitmap); }
                     finally { DeleteObject(bitmap); }
                 }
             } finally { Marshal.ReleaseComObject(item); }
         }
+        if (!String.IsNullOrEmpty(entry.Target) && File.Exists(entry.Target)) {
+            try {
+                using (var icon = Icon.ExtractAssociatedIcon(entry.Target))
+                    if (icon != null) return icon.ToBitmap();
+            } catch (ArgumentException) { }
+              catch (System.ComponentModel.Win32Exception) { }
+        }
         return SystemIcons.Application.ToBitmap();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfo {
+        public uint Size; public int Width, Height; public ushort Planes, Bits;
+        public uint Compression, Bytes; public int X, Y; public uint Colors, Important;
+    }
+    [DllImport("gdi32")] private static extern int GetDIBits(IntPtr dc, IntPtr bitmap, uint first,
+        uint lines, IntPtr pixels, ref BitmapInfo info, uint usage);
+    private static Bitmap ShellBitmap(IntPtr handle)
+    {
+        // FromHbitmap discards alpha. Shell icon backgrounds then become black.
+        using (var dimensions = Image.FromHbitmap(handle))
+        using (var screen = Graphics.FromHwnd(IntPtr.Zero)) {
+            var size = dimensions.Size;
+            var result = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            var data = result.LockBits(new Rectangle(Point.Empty, size),
+                System.Drawing.Imaging.ImageLockMode.WriteOnly, result.PixelFormat);
+            var dc = screen.GetHdc();
+            bool hasAlpha = false;
+            try {
+                var info = new BitmapInfo { Size = 40, Width = size.Width, Height = -size.Height, Planes = 1, Bits = 32 };
+                if (GetDIBits(dc,handle,0,(uint)size.Height,data.Scan0,ref info,0) == size.Height) {
+                    for (int y = 0; y < size.Height && !hasAlpha; ++y)
+                        for (int x = 0; x < size.Width && !hasAlpha; ++x)
+                            hasAlpha = Marshal.ReadByte(data.Scan0, y * data.Stride + 4*x + 3) != 0;
+                }
+            } finally { screen.ReleaseHdc(dc); result.UnlockBits(data); }
+            if (hasAlpha) return result;
+            result.Dispose();
+            return new Bitmap(dimensions);
+        }
     }
 
     private const string PlacementMarker = "RustDesk.PhoneWorkspace.Placement";
@@ -166,16 +162,6 @@ internal sealed partial class PhoneWorkspace
             Native.SetWindowPos(e.Window, IntPtr.Zero, area.Left, area.Top,
                 Math.Min(area.Width, r.Right-r.Left), Math.Min(area.Height, r.Bottom-r.Top), 0x4014);
         }
-    }
-
-    private void LayoutLibrary(Rectangle area)
-    {
-        lastArea = area.Size;
-        int width = Math.Min(200, area.Width);
-        Bounds = expanded ? area : new Rectangle(area.Left + (area.Width - width) / 2,
-            area.Bottom - appsButton.Height, width, appsButton.Height);
-        actions.Visible = expanded;
-        groups.Visible = expanded && area.Width > area.Height;
     }
 
     private void PopulateGroups()
