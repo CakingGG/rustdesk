@@ -517,8 +517,9 @@ jobs:
         sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
         # Use a separate install ID so the trial can coexist with the official client.
         sed -i 's/applicationId "com.carriez.flutter_hbb"/applicationId "com.carriez.flutter_hbb.phoneworkspace"/' ./flutter/android/app/build.gradle
-        # Sign the trial using the runner's debug key.
-        sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
+        # Sign the finished APK separately so Gradle never receives the test key.
+        sed -i 's/signingConfig signingConfigs.release/signingConfig null/' ./flutter/android/app/build.gradle
+        build_number=$((1000 + GITHUB_RUN_NUMBER))
         case ${{ matrix.job.target }} in
           aarch64-linux-android)
             mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
@@ -527,7 +528,7 @@ jobs:
             # build flutter
             pushd flutter
             flutter test test/phone_workspace_gestures_test.dart
-            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
+            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi --build-number "$build_number"
             mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
           ;;
           armv7-linux-androideabi)
@@ -536,7 +537,7 @@ jobs:
             cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/armeabi-v7a/librustdesk.so
             # build flutter
             pushd flutter
-            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
+            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi --build-number "$build_number"
             mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
           ;;
           x86_64-linux-android)
@@ -545,7 +546,7 @@ jobs:
             cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86_64/librustdesk.so
             # build flutter
             pushd flutter
-            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
+            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi --build-number "$build_number"
             mv build/app/outputs/flutter-apk/app-x86_64-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
           ;;
           i686-linux-android)
@@ -554,20 +555,37 @@ jobs:
             cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86/librustdesk.so
             # build flutter
             pushd flutter
-            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
+            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi --build-number "$build_number"
             mv build/app/outputs/flutter-apk/app-x86-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
           ;;
         esac
         popd
-        mkdir -p signed-apk; pushd signed-apk
-        mv ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
+    - name: Sign the phone workspace test APK
+      shell: bash
+      env:
+        KEYSTORE_BASE64: ${{ secrets.PHONE_WORKSPACE_SIGNING_KEYSTORE }}
+        STORE_PASSWORD: ${{ secrets.PHONE_WORKSPACE_SIGNING_PASSWORD }}
+      run: |
+        set -euo pipefail
+        umask 077
+        keystore=$(mktemp "$RUNNER_TEMP/phone-workspace.XXXXXX")
+        trap 'rm -f "$keystore"' EXIT
+        printf '%s' "${KEYSTORE_BASE64:?Missing phone workspace signing key}" | base64 --decode > "$keystore"
+        tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+        apk="rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk"
+        mkdir -p signed-apk
+        "$tools/zipalign" -P 16 -f 4 "$apk" "$RUNNER_TEMP/phone-aligned.apk"
+        "$tools/apksigner" sign --ks "$keystore" --ks-key-alias phone-workspace --ks-pass env:STORE_PASSWORD \
+          --out "signed-apk/$apk" "$RUNNER_TEMP/phone-aligned.apk"
     - name: Verify APK signature and native feature
       shell: bash
       run: |
         set -eu
         apk=$(find signed-apk -name '*.apk' -print -quit)
         tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-        "$tools/apksigner" verify --verbose "$apk"
+        cert_sha256=c7b11b337c030a57c3e3eaa6dfa4ad907a9a46416c6bae750168869d5e6fadc0
+        "$tools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/phone-signer.txt"
+        grep -Fx "Signer #1 certificate SHA-256 digest: $cert_sha256" "$RUNNER_TEMP/phone-signer.txt"
         "$tools/aapt" dump badging "$apk" | grep -F "name='com.carriez.flutter_hbb.phoneworkspace'"
         unzip -p "$apk" lib/arm64-v8a/librustdesk.so > "$RUNNER_TEMP/phone-library.so"
         readelf --wide --dyn-syms "$RUNNER_TEMP/phone-library.so" | grep -F Java_ffi_FFI_setPhoneDisplay
