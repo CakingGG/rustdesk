@@ -63,7 +63,7 @@ class _Session extends Fake implements FFI {
   @override
   final sessionId = UuidValue('00000000-0000-4000-8000-000000000001');
   @override
-  final canvasModel = _Canvas();
+  final _Canvas canvasModel = _Canvas();
   @override
   final ffiModel = _Model();
   @override
