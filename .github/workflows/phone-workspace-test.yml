@@ -319,7 +319,13 @@ jobs:
         New-Item -ItemType Directory -Force SignOutput
     - name: Verify the app switcher leaves bottom controls clickable
       shell: powershell
-      run: ./.github/scripts/test-phone-workspace-appbar.ps1 -Picker ./rustdesk/rustdesk-phone-workspace.exe
+      run: |
+        $test = "$env:RUNNER_TEMP\phone-appbar-test.exe"
+        $compiler = "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+        & $compiler /nologo /target:exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$test" .github\scripts\PhoneWorkspaceAppBarTest.cs
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        & $test (Resolve-Path .\rustdesk\rustdesk-phone-workspace.exe).Path
+        exit $LASTEXITCODE
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce
       with:
