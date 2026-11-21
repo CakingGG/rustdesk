@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,7 +19,7 @@ class _LocalGitHub extends Fake implements HttpClient {
 void main() {
   final payload = utf8.encode('test installer');
   final digest = 'sha256:${sha256.convert(payload)}';
-  Map<String, dynamic> release(int n) => {
+  Map<String, dynamic> release(int n, {List<int>? installer}) => {
         'tag_name': 'phone-workspace-$n',
         'draft': false,
         'assets': [
@@ -29,8 +30,10 @@ void main() {
             {
               'name': name,
               'state': 'uploaded',
-              'size': payload.length,
-              'digest': digest
+              'size': installer?.length ?? payload.length,
+              'digest': installer == null
+                  ? digest
+                  : 'sha256:${sha256.convert(installer)}'
             }
         ],
       };
@@ -73,6 +76,60 @@ void main() {
       expect(paths.last,
           '/CakingGG/rustdesk/releases/download/phone-workspace-14/$name');
     }
+  });
+
+  test(
+      'downloads ranges concurrently and finishes an interrupted range from the next byte',
+      () async {
+    final bytes =
+        List<int>.generate(2 * 1024 * 1024 + 13, (i) => (i ~/ 31 + i) % 251);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final client = HttpClient();
+    final cache = await Directory.systemTemp.createTemp();
+    addTearDown(() async {
+      client.close(force: true);
+      await server.close(force: true);
+      await cache.delete(recursive: true);
+    });
+    final concurrent = Completer<void>();
+    var overlapped = false;
+    final starts = <int>[];
+    const interruptedAt = 317;
+    server.listen((request) async {
+      final response = request.response;
+      final range = request.headers.value(HttpHeaders.rangeHeader);
+      if (request.uri.path.endsWith('/releases')) {
+        response.write(jsonEncode([release(16, installer: bytes)]));
+      } else if (range == null) {
+        response.add(bytes);
+      } else {
+        final offsets =
+            range.substring('bytes='.length).split('-').map(int.parse);
+        final start = offsets.first, end = offsets.last;
+        starts.add(start);
+        response.statusCode = HttpStatus.partialContent;
+        response.headers.set(HttpHeaders.contentRangeHeader,
+            'bytes $start-$end/${bytes.length}');
+        if (start == 0) {
+          response.add(bytes.sublist(0, interruptedAt));
+          await response.flush();
+          await concurrent.future
+              .timeout(const Duration(seconds: 5), onTimeout: () {});
+          overlapped = concurrent.isCompleted;
+        } else {
+          if (!concurrent.isCompleted) concurrent.complete();
+          response.add(bytes.sublist(start, end + 1));
+        }
+      }
+      await response.close();
+    });
+    final github = _LocalGitHub(client, server.port);
+    final update = await PhoneWorkspaceRelease.check(github, android: false);
+    final file = await update.download(github, cache, (_) {});
+    expect(
+        (await sha256.bind(file.openRead()).first).toString(), update.digest);
+    expect(overlapped, isTrue);
+    expect(starts, contains(interruptedAt));
   });
 
   test(

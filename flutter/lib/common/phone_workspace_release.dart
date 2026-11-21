@@ -1,9 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
 const _repository = 'CakingGG/rustdesk';
+const _partSize = 512 * 1024;
+const _parallelDownloads = 4;
+const _readTimeout = Duration(seconds: 45);
 final _tag = RegExp(r'^phone-workspace-([1-9][0-9]*)$');
 final _digest = RegExp(r'^sha256:([0-9a-f]{64})$');
 
@@ -61,16 +67,16 @@ class PhoneWorkspaceRelease {
     return PhoneWorkspaceRelease._(build, name, bytes, hash[1]!);
   }
 
-  Future<File> download(HttpClient client, Directory cache,
-      void Function(double) onProgress) async {
-    var uri = Uri.https('github.com',
-        '/$_repository/releases/download/phone-workspace-$build/$assetName');
-    late HttpClientResponse response;
+  Future<(Uri, HttpClientResponse)> _getRange(
+      HttpClient client, Uri uri, int start, int end) async {
     for (var redirects = 0;; redirects++) {
       final request = await client.getUrl(uri);
       request.followRedirects = false;
-      response = await request.close().timeout(const Duration(seconds: 30));
-      if (!response.isRedirect) break;
+      request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-$end');
+      request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+      final response =
+          await request.close().timeout(const Duration(seconds: 30));
+      if (!response.isRedirect) return (uri, response);
       final location = response.headers.value(HttpHeaders.locationHeader);
       if (redirects >= 4 || location == null) {
         throw HttpException('Invalid installer redirect', uri: uri);
@@ -88,7 +94,50 @@ class PhoneWorkspaceRelease {
       }
       await response.drain<void>().timeout(const Duration(seconds: 30));
     }
-    if (response.statusCode != HttpStatus.ok) {
+  }
+
+  Future<Uint8List> _readPart(HttpClient client, Uri uri, int start,
+      HttpClientResponse? response, void Function(int) onBytes) async {
+    final end = math.min(start + _partSize, size) - 1;
+    final bytes = BytesBuilder(copy: false);
+    for (var attempt = 0;; attempt++) {
+      final offset = start + bytes.length;
+      try {
+        response ??= (await _getRange(client, uri, offset, end)).$2;
+        if (response.statusCode != HttpStatus.partialContent ||
+            response.headers.value(HttpHeaders.contentRangeHeader) !=
+                'bytes $offset-$end/$size') {
+          await response.listen((_) {}).cancel();
+          throw const FormatException('Unexpected installer byte range');
+        }
+        await for (final chunk in response.timeout(_readTimeout)) {
+          if (start + bytes.length + chunk.length > end + 1) {
+            throw const FormatException(
+                'Installer exceeds its requested range');
+          }
+          bytes.add(chunk);
+          onBytes(chunk.length);
+        }
+        if (start + bytes.length == end + 1) return bytes.takeBytes();
+        throw const HttpException('Incomplete installer byte range');
+      } catch (e) {
+        if (attempt != 0 ||
+            start + bytes.length > end ||
+            (e is! IOException && e is! TimeoutException)) rethrow;
+        response = null;
+      }
+    }
+  }
+
+  Future<File> download(HttpClient client, Directory cache,
+      void Function(double) onProgress) async {
+    final url = Uri.https('github.com',
+        '/$_repository/releases/download/phone-workspace-$build/$assetName');
+    final (uri, response) =
+        await _getRange(client, url, 0, math.min(_partSize, size) - 1);
+    final partial = response.statusCode == HttpStatus.partialContent;
+    if (!partial && response.statusCode != HttpStatus.ok) {
+      await response.listen((_) {}).cancel();
       throw HttpException('Download HTTP ${response.statusCode}',
           uri: uri.replace(query: ''));
     }
@@ -99,16 +148,34 @@ class PhoneWorkspaceRelease {
     try {
       final sink = file.openWrite();
       var received = 0;
+      void onBytes(int count) {
+        received += count;
+        if (received > size) {
+          throw const FormatException('Installer exceeds its published size');
+        }
+        onProgress(received / size);
+      }
+
       try {
-        await sink.addStream(
-            response.timeout(const Duration(seconds: 45)).map((chunk) {
-          received += chunk.length;
-          if (received > size) {
-            throw const FormatException('Installer exceeds its published size');
+        if (partial) {
+          for (var batch = 0;
+              batch < size;
+              batch += _parallelDownloads * _partSize) {
+            final limit =
+                math.min(batch + _parallelDownloads * _partSize, size);
+            final parts = await Future.wait([
+              for (var start = batch; start < limit; start += _partSize)
+                _readPart(
+                    client, uri, start, start == 0 ? response : null, onBytes)
+            ]);
+            await sink.addStream(Stream.fromIterable(parts));
           }
-          onProgress(received / size);
-          return chunk;
-        }));
+        } else {
+          await sink.addStream(response.timeout(_readTimeout).map((chunk) {
+            onBytes(chunk.length);
+            return chunk;
+          }));
+        }
       } finally {
         await sink.close();
       }
