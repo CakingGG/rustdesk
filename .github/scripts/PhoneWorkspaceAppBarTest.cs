@@ -62,6 +62,10 @@ class PhoneWorkspaceAppBarTest
         var bottom = new Point(client.Right, client.Bottom);
         if (!ClientToScreen(app, ref bottom) || bottom.Y > bar.Top || WorkArea(app).Bottom != bar.Top)
             throw new Exception("The switch bar overlaps the application's client area");
+        var monitor = Screen.FromHandle(bar.Handle).Bounds;
+        // The recorded 360 dp phone has a 48 dp expand target and a 16 dp bottom margin.
+        if (monitor.Bottom - bottom.Y < Math.Ceiling(Math.Min(monitor.Width, monitor.Height) * 64.0 / 360))
+            throw new Exception("The phone's expand button can still intercept bottom-right application taps");
         var send = FindWindowEx(app, IntPtr.Zero, null, "Send");
         if (!GetWindowRect(send, out sendRect) ||
             WindowFromPoint(new Point((sendRect.Left + sendRect.Right) / 2, (sendRect.Top + sendRect.Bottom) / 2)) != send)

@@ -361,7 +361,7 @@ internal sealed partial class PhoneWorkspace
             positioning = true;
             try {
                 float scale = Math.Max(0.65f, Math.Min(monitor.Width, monitor.Height) / 390f);
-                int bottomClearance = (int)Math.Ceiling(60 * scale);
+                int bottomClearance = (int)Math.Ceiling(72 * scale);
                 var data = Data();
                 data.Rect = new Native.Rect { Left = monitor.Left, Top = monitor.Bottom - bottomClearance,
                     Right = monitor.Right, Bottom = monitor.Bottom };
