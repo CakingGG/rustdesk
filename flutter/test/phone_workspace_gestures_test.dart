@@ -44,7 +44,7 @@ class _Session extends Fake implements FFI {
   @override
   final cursorModel = _Cursor();
   @override
-  final inputModel = _Input();
+  final _Input inputModel = _Input();
 }
 
 void main() {
