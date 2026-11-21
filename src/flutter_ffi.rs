@@ -3087,7 +3087,12 @@ pub mod server_side {
         width: i32,
         height: i32,
     ) {
-        *crate::client::PHONE_DISPLAY.lock().unwrap() = (width, height);
+        let previous = std::mem::replace(
+            &mut *crate::client::PHONE_DISPLAY.lock().unwrap(), (width, height),
+        );
+        if width > 0 && height > 0 && (previous.0 > previous.1) != (width > height) {
+            crate::flutter::rotate_phone_workspace(width > height);
+        }
     }
 
     #[no_mangle]

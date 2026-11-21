@@ -247,8 +247,19 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun updatePhoneDisplay() {
-        val (width, height) = getScreenSize(windowManager)
-        FFI.setPhoneDisplay(width, height)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val metrics = windowManager.currentWindowMetrics
+            val insets = metrics.windowInsets.getInsets(
+                android.view.WindowInsets.Type.displayCutout() or android.view.WindowInsets.Type.systemBars()
+            )
+            FFI.setPhoneDisplay(metrics.bounds.width() - insets.left - insets.right,
+                metrics.bounds.height() - insets.top - insets.bottom)
+        } else {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getMetrics(metrics)
+            FFI.setPhoneDisplay(metrics.widthPixels, metrics.heightPixels)
+        }
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {

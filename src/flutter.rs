@@ -50,6 +50,19 @@ const CORE_MAIN_EXIT_FAILURE: i32 = 1;
 
 pub type FlutterSession = Arc<Session<FlutterHandler>>;
 
+#[cfg(target_os = "android")]
+pub(super) fn rotate_phone_workspace(landscape: bool) {
+    for session in sessions::get_sessions() {
+        if session.is_default() && session.ui_handler.peer_info.read().unwrap().phone_workspace {
+            let mut misc = Misc::new();
+            misc.set_phone_workspace_landscape(landscape);
+            let mut message = Message::new();
+            message.set_misc(misc);
+            session.send(Data::Message(message));
+        }
+    }
+}
+
 lazy_static::lazy_static! {
     pub(crate) static ref CUR_SESSION_ID: RwLock<SessionID> = Default::default(); // For desktop only
     static ref GLOBAL_EVENT_STREAM: RwLock<HashMap<String, StreamSink<String>>> = Default::default(); // rust to dart event channel
@@ -658,6 +671,12 @@ impl FlutterHandler {
                 let scaled_width = (d.width as f64 / d.scale).round() as i32;
                 h.insert("scaled_width", scaled_width);
             }
+            #[cfg(target_os = "android")]
+            let h = {
+                let mut fields = serde_json::json!(h);
+                fields["name"] = serde_json::json!(d.name);
+                fields
+            };
             msg_vec.push(h);
         }
         serde_json::ser::to_string(&msg_vec).unwrap_or("".to_owned())
@@ -910,6 +929,15 @@ impl InvokeUiSession for FlutterHandler {
         let features = serde_json::ser::to_string(&features).unwrap_or("".to_owned());
         let resolutions = serialize_resolutions(&pi.resolutions.resolutions);
         *self.peer_info.write().unwrap() = pi.clone();
+        #[cfg(target_os = "android")]
+        if pi.phone_workspace {
+            let (w, h) = *PHONE_DISPLAY.lock().unwrap();
+            if w > 0 && h > 0 && pi.displays.get(pi.current_display as usize)
+                .is_some_and(|d| (d.width > d.height) != (w > h))
+            {
+                rotate_phone_workspace(w > h);
+            }
+        }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let is_support_multi_ui_session = crate::common::is_support_multi_ui_session(&pi.version);
         #[cfg(any(target_os = "android", target_os = "ios"))]

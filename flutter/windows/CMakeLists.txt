@@ -96,12 +96,14 @@ set(PHONE_PICKER "${CMAKE_CURRENT_BINARY_DIR}/rustdesk-phone-workspace.exe")
 set(PHONE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runner/PhoneWorkspace.cs")
 # The .NET Framework compiler parses forward slashes as option delimiters.
 file(TO_NATIVE_PATH "${PHONE_SOURCE}" PHONE_SOURCE_NATIVE)
+set(PHONE_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/runner/PhoneLibrary.cs")
+file(TO_NATIVE_PATH "${PHONE_LIBRARY}" PHONE_LIBRARY_NATIVE)
 file(TO_NATIVE_PATH "${PHONE_PICKER}" PHONE_PICKER_NATIVE)
 add_custom_command(OUTPUT "${PHONE_PICKER}"
   COMMAND "${PHONE_CSC}" /nologo /target:winexe /optimize+ /utf8output
           /reference:System.Windows.Forms.dll /reference:System.Drawing.dll
-          "/out:${PHONE_PICKER_NATIVE}" "${PHONE_SOURCE_NATIVE}"
-  DEPENDS "${PHONE_SOURCE}" VERBATIM)
+          "/out:${PHONE_PICKER_NATIVE}" "${PHONE_SOURCE_NATIVE}" "${PHONE_LIBRARY_NATIVE}"
+  DEPENDS "${PHONE_SOURCE}" "${PHONE_LIBRARY}" VERBATIM)
 add_custom_target(phone_workspace_picker DEPENDS "${PHONE_PICKER}")
 add_dependencies(${BINARY_NAME} phone_workspace_picker)
 install(FILES "${PHONE_PICKER}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)

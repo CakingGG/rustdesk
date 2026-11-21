@@ -36,7 +36,8 @@ pub(crate) struct Workspace {
     name: String,
     plugged: bool,
     picker: Option<(OwnedHandle, OwnedHandle)>,
-    mode_slot: Option<(String, String)>,
+    mode_slots: Vec<(String, String)>,
+    size: (u32, u32),
 }
 
 fn monitor_names() -> Vec<String> {
@@ -71,7 +72,8 @@ impl Workspace {
             name: String::new(),
             plugged: false,
             picker: None,
-            mode_slot: None,
+            mode_slots: Vec::new(),
+            size: (width, height),
         };
         // Amyuni's eject command takes no device ID. Never adopt another virtual monitor.
         if crate::privacy_mode::is_in_privacy_mode() || !monitor_names().is_empty() {
@@ -91,18 +93,19 @@ impl Workspace {
                 Err(err) => return Err(err.into()),
             }
         };
-        let mode = format!("{width},{height}");
-        let slots = modes.enum_values().collect::<std::io::Result<Vec<_>>>()?;
-        if !slots
-            .iter()
-            .any(|(key, _)| modes.get_value::<String, _>(key).ok().as_ref() == Some(&mode))
-        {
-            let slot = (0..10)
-                .map(|n| n.to_string())
-                .find(|key| !slots.iter().any(|(k, _)| k == key))
-                .ok_or_else(|| anyhow!("No available Amyuni custom resolution slot"))?;
-            modes.set_value(&slot, &mode)?;
-            workspace.mode_slot = Some((slot, mode));
+        register_mode(&modes, &mut workspace.mode_slots, width, height)?;
+        if width != height {
+            if let Err(err) = register_mode(&modes, &mut workspace.mode_slots, height, width) {
+                log::warn!("Phone display rotation unavailable: {}", err);
+            }
+        }
+        // Amyuni reads custom modes when the monitor attaches. Prepare phone-sized
+        // layouts for apps with different minimum widths before that point.
+        for (w, h) in crate::phone_mode::reading_modes(width, height) {
+            if let Err(err) = register_mode(&modes, &mut workspace.mode_slots, w, h) {
+                log::debug!("Optional phone reading mode unavailable: {}", err);
+                break;
+            }
         }
 
         amyuni_idd::set_monitor_attached(true, Some(Duration::from_secs(4)))?;
@@ -161,6 +164,32 @@ impl Workspace {
         self.name == name.trim_end_matches('\0')
     }
 
+    pub(crate) fn picker_closed(&self) -> bool {
+        self.picker.as_ref().is_some_and(|(_, process)| unsafe {
+            WaitForSingleObject(process.as_raw_handle().cast(), 0) == 0
+        })
+    }
+
+    pub(crate) async fn rotate(&mut self, landscape: bool) {
+        let (width, height) = self.size;
+        if (width > height) == landscape || width == height {
+            return;
+        }
+        let name = self.name.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            if !monitor_names().contains(&name) {
+                return false;
+            }
+            let wide: Vec<_> = name.encode_utf16().chain(Some(0)).collect();
+            unsafe { set_phone_display_mode(wide.as_ptr(), height, width) == 0 }
+        }).await;
+        if matches!(result, Ok(true)) {
+            self.size = (height, width);
+        } else {
+            hbb_common::throttled_log!(Duration::from_secs(30), warn, "Cannot rotate the phone display");
+        }
+    }
+
     pub(crate) async fn close(self) {
         if let Err(err) = tokio::task::spawn_blocking(move || drop(self)).await {
             log::warn!("Phone workspace cleanup: {}", err);
@@ -190,7 +219,7 @@ impl Drop for Workspace {
                 }
             }
         }
-        if let Some((slot, mode)) = self.mode_slot.take() {
+        for (slot, mode) in self.mode_slots.drain(..) {
             let released = RegKey::predef(HKEY_LOCAL_MACHINE)
                 .open_subkey_with_flags(MODES, KEY_READ | KEY_SET_VALUE | KEY_WOW64_64KEY)
                 .and_then(|key| {
@@ -205,4 +234,18 @@ impl Drop for Workspace {
         }
         IN_USE.store(false, Ordering::Release);
     }
+}
+
+fn register_mode(modes: &RegKey, owned: &mut Vec<(String, String)>, width: u32, height: u32) -> ResultType<()> {
+    let mode = format!("{width},{height}");
+    let slots = modes.enum_values().collect::<std::io::Result<Vec<_>>>()?;
+    if slots.iter().any(|(k, _)| modes.get_value::<String, _>(k).ok().as_ref() == Some(&mode)) {
+        return Ok(());
+    }
+    let slot = (0..10).map(|n| n.to_string())
+        .find(|key| !slots.iter().any(|(k, _)| k == key))
+        .ok_or_else(|| anyhow!("No available Amyuni custom resolution slot"))?;
+    modes.set_value(&slot, &mode)?;
+    owned.push((slot, mode));
+    Ok(())
 }

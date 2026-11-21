@@ -1204,6 +1204,12 @@ impl Connection {
                 }
                 _ = second_timer.tick() => {
                     #[cfg(windows)]
+                    if conn.phone_workspace.as_ref().is_some_and(|w| w.picker_closed()) {
+                        if let Some(workspace) = conn.phone_workspace.take() {
+                            workspace.close().await;
+                        }
+                    }
+                    #[cfg(windows)]
                     conn.portable_check();
                     #[cfg(windows)]
                     if let Some((impl_key, _)) = conn.privacy_preparation.as_ref() {
@@ -4120,6 +4126,14 @@ impl Connection {
                     Some(misc::Union::ChangeDisplayResolution(dr)) => {
                         if !self.view_camera {
                             self.change_resolution(Some(dr.display as _), &dr.resolution);
+                        }
+                    }
+                    #[cfg(windows)]
+                    Some(misc::Union::PhoneWorkspaceLandscape(landscape)) => {
+                        if self.peer_keyboard_enabled() && self.is_remote() {
+                            if let Some(workspace) = self.phone_workspace.as_mut() {
+                                workspace.rotate(landscape).await;
+                            }
                         }
                     }
                     Some(misc::Union::AutoAdjustFps(fps)) => video_service::VIDEO_QOS

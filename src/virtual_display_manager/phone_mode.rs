@@ -20,10 +20,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn phone_reading_modes_keep_aspect_in_both_orientations() {
+        assert_eq!(reading_modes(864, 1920), reading_modes(1920, 864));
+        assert_eq!(reading_modes(864, 1920)[..2], [(540, 1200), (1200, 540)]);
+        assert!(reading_modes(480, 960).is_empty());
+    }
+
+    #[test]
     fn bounds_both_orientations_without_stretching() {
         assert_eq!(fit(1080, 2400), Some((864, 1920)));
         assert_eq!(fit(2400, 1080), Some((1920, 864)));
         assert_eq!(fit(720, 1280), Some((720, 1280)));
         assert_eq!(fit(0, i32::MAX), None);
     }
+}
+
+pub(super) fn reading_modes(width: u32, height: u32) -> Vec<(u32, u32)> {
+    let short = width.min(height);
+    let long = width.max(height);
+    let mut modes = Vec::new();
+    for edge in [540, 720] {
+        if edge < short {
+            let other = ((long * edge + short) / (2 * short)) * 2;
+            modes.push((edge, other));
+            if edge != other {
+                modes.push((other, edge));
+            }
+        }
+    }
+    modes
 }

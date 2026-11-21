@@ -10,18 +10,25 @@ using System.Threading;
 using System.Windows.Forms;
 
 // Runs on the user's desktop, at the shell user's integrity level.
-internal sealed class PhoneWorkspace : Form
+internal sealed partial class PhoneWorkspace : Form
 {
     private readonly string display;
     private readonly string stopEvent;
     private readonly Button appsButton = new Button();
     private readonly ListBox list = new ListBox();
     private readonly Label status = new Label();
+    private readonly TextBox search = new TextBox();
+    private readonly TabControl sections = new TabControl();
+    private readonly Button restore = new Button();
+    private List<Entry> running = new List<Entry>();
+    private IntPtr currentWindow;
+    private Size lastArea;
     private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
     private readonly List<Entry> installed = new List<Entry>();
     private readonly Dictionary<IntPtr, Placement> moved = new Dictionary<IntPtr, Placement>();
     private readonly uint ownPid = (uint)Process.GetCurrentProcess().Id;
     private Entry pending;
+    private HashSet<IntPtr> beforeLaunch;
     private DateTime deadline;
     private bool expanded;
     private static bool Chinese { get { return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "zh"; } }
@@ -29,13 +36,13 @@ internal sealed class PhoneWorkspace : Form
 
     private sealed class Entry
     {
-        public string Name, AppId, Target;
+        public string Name, AppId, Target, AppName, SearchText, ShellPath;
         public IntPtr Window;
         public uint Pid;
         public dynamic ShellItem;
-        public override string ToString() { return Name; }
+        public override string ToString() { return String.IsNullOrEmpty(AppName) ? Name : AppName + "   " + Name; }
     }
-    private sealed class Placement { public uint Pid; public Native.WindowPlacement Original; public Native.Rect Bounds; }
+    private sealed class Placement { public uint Pid; public int Token; public Native.WindowPlacement Original; public Native.Rect Bounds; }
 
     [STAThread]
     private static void Main(string[] args)
@@ -62,8 +69,12 @@ internal sealed class PhoneWorkspace : Form
         TopMost = true;
         appsButton.Text = TextFor("Apps", "应用");
         appsButton.Height = 48;
-        appsButton.Dock = DockStyle.Top;
-        appsButton.Click += delegate { ShowPicker(!expanded); };
+        appsButton.Dock = DockStyle.Bottom;
+        appsButton.Click += delegate {
+            if (expanded && currentWindow == IntPtr.Zero) return;
+            ShowPicker(!expanded);
+            if (!expanded) Native.SetForegroundWindow(currentWindow);
+        };
         status.Height = 44;
         status.Dock = DockStyle.Top;
         list.Dock = DockStyle.Fill;
@@ -76,14 +87,47 @@ internal sealed class PhoneWorkspace : Form
         list.KeyDown += delegate(object sender, KeyEventArgs e) {
             if (e.KeyCode == Keys.Enter && list.SelectedItem != null) SelectApp((Entry)list.SelectedItem);
         };
-        Controls.Add(list);
+        var runningPage = new TabPage(TextFor("Running windows", "运行中的窗口"));
+        var appsPage = new TabPage(TextFor("All apps", "全部应用"));
+        sections.TabPages.Add(runningPage);
+        sections.TabPages.Add(appsPage);
+        sections.Dock = DockStyle.Fill;
+        runningPage.Controls.Add(list);
+        sections.SelectedIndexChanged += delegate {
+            if (sections.SelectedTab == null) return;
+            RefreshEntries();
+        };
+        search.Dock = DockStyle.Top;
+        search.AccessibleName = TextFor("Search apps or window titles", "搜索应用或窗口标题");
+        search.TextChanged += delegate { RefreshEntries(); };
+        restore.Dock = DockStyle.Bottom;
+        restore.Height = 44;
+        restore.Text = TextFor("Return window to original screen", "将窗口还原到原屏幕");
+        restore.Click += delegate {
+            RestoreCurrent();
+            ShowPicker(true);
+        };
+        Controls.Add(sections);
+        Controls.Add(search);
         Controls.Add(status);
+        Controls.Add(restore);
         Controls.Add(appsButton);
+        InitializeLibrary();
         Shown += delegate { ShowPicker(true); };
-        FormClosed += delegate { timer.Stop(); RestoreWindows(); };
+        FormClosed += delegate { timer.Stop(); RestoreWindows(); ReturnOtherWindows(); };
         timer.Interval = 200;
         timer.Tick += delegate {
-            if (!SessionAlive() || TargetScreen() == null) { Close(); return; }
+            var screen = TargetScreen();
+            if (!SessionAlive() || screen == null) { Close(); return; }
+            if (currentWindow != IntPtr.Zero && !ManagedWindowAlive()) {
+                RestoreCurrent();
+                ShowPicker(true);
+            }
+            if (lastArea != screen.WorkingArea.Size) {
+                LayoutLibrary(screen.WorkingArea);
+                if (currentWindow != IntPtr.Zero) FitWindow(currentWindow);
+            }
+            if (!expanded && ManagedWindowAlive()) FollowDialog(screen);
             if (pending == null) return;
             var match = FindLaunchedWindow();
             if (match != null) { pending = null; MoveWindowHere(match); }
@@ -116,20 +160,42 @@ internal sealed class PhoneWorkspace : Form
         var screen = TargetScreen();
         if (screen == null) { Close(); return; }
         expanded = open;
-        list.Visible = status.Visible = open;
-        var area = screen.WorkingArea;
-        Bounds = open ? area : new Rectangle(area.Right - 88, area.Top, 88, appsButton.Height);
+        sections.Visible = search.Visible = status.Visible = open;
+        restore.Visible = open && currentWindow != IntPtr.Zero;
+        LayoutLibrary(screen.WorkingArea);
+        appsButton.Text = open && currentWindow != IntPtr.Zero
+            ? TextFor("Back to window", "返回窗口") : TextFor("Apps", "应用");
         if (!open) return;
         pending = null;
-        status.Text = TextFor("Choose an open window or application", "选择已打开的窗口或应用");
+        beforeLaunch = null;
+        status.Text = TextFor("Search apps or window titles", "搜索应用或窗口标题");
+        running = Windows();
+        foreach (var entry in running) {
+            entry.Target = Executable(entry.Pid);
+            entry.AppName = System.IO.Path.GetFileNameWithoutExtension(entry.Target) ?? entry.Name;
+        }
+        PopulateGroups();
+        RefreshEntries();
+        Activate();
+    }
+
+    private void RefreshEntries()
+    {
+        bool all = sections.SelectedIndex == 1;
+        if (all && installed.Count == 0) ReadApps();
+        string query = search.Text.Trim();
+        if (all) {
+            FilterApps(query);
+            return;
+        }
         list.BeginUpdate();
         try {
             list.Items.Clear();
-            foreach (var entry in Windows()) list.Items.Add(entry);
-            if (installed.Count == 0) ReadApps();
-            foreach (var entry in installed) list.Items.Add(entry);
+            foreach (var entry in running)
+                if ((!groups.Visible || groups.SelectedIndex <= 0 || entry.AppName == (string)groups.SelectedItem) &&
+                    MatchesSearch(entry, query))
+                    list.Items.Add(entry);
         } finally { list.EndUpdate(); }
-        Activate();
     }
 
     private void ReadApps()
@@ -141,7 +207,7 @@ internal sealed class PhoneWorkspace : Form
             foreach (dynamic item in folder.Items()) {
                 string name = item.Name;
                 if (String.IsNullOrEmpty(name)) continue;
-                installed.Add(new Entry { Name = name, ShellItem = item,
+                installed.Add(new Entry { Name = name, ShellItem = item, ShellPath = Convert.ToString(item.Path),
                     AppId = Convert.ToString(item.ExtendedProperty("System.AppUserModel.ID")),
                     Target = Convert.ToString(item.ExtendedProperty("System.Link.TargetParsingPath")) });
             }
@@ -185,6 +251,7 @@ internal sealed class PhoneWorkspace : Form
         IntPtr foreground = Native.GetForegroundWindow();
         windows.Sort((a,b) => (b.Window == foreground).CompareTo(a.Window == foreground));
         foreach (var candidate in windows) {
+            if (beforeLaunch != null && beforeLaunch.Contains(candidate.Window)) continue;
             // Hosted and packaged apps can share a process; the window's AppUserModelID wins.
             if (!String.IsNullOrEmpty(pending.AppId)) {
                 string windowId = Native.WindowAppId(candidate.Window);
@@ -217,6 +284,10 @@ internal sealed class PhoneWorkspace : Form
         var placement = new Native.WindowPlacement();
         placement.Length = Marshal.SizeOf(placement);
         if (!Native.GetWindowPlacement(entry.Window, ref placement)) return;
+        if (IsHungAppWindow(entry.Window)) {
+            status.Text = TextFor("This application is not responding", "此应用暂时没有响应");
+            return;
+        }
         Native.Rect bounds;
         if (!moved.ContainsKey(entry.Window)) {
             if (!Native.GetWindowRect(entry.Window, out bounds)) return;
@@ -228,7 +299,12 @@ internal sealed class PhoneWorkspace : Form
                 bounds = new Native.Rect { Left = placement.Left + dx, Top = placement.Top + dy,
                     Right = placement.Right + dx, Bottom = placement.Bottom + dy };
             }
-            moved.Add(entry.Window, new Placement { Pid = pid, Original = placement, Bounds = bounds });
+            var saved = new Placement { Pid = pid, Original = placement, Bounds = bounds };
+            if (!RememberWindow(entry.Window, saved)) {
+                status.Text = TextFor("Cannot record the original window position", "无法记录窗口原位置");
+                return;
+            }
+            moved.Add(entry.Window, saved);
         }
         var area = screen.WorkingArea;
         ShowPicker(false);
@@ -239,26 +315,43 @@ internal sealed class PhoneWorkspace : Form
             return;
         }
         Native.ShowWindowAsync(entry.Window, 3); // Maximize using the destination work area.
+        if (currentWindow != entry.Window) RestoreCurrent();
+        currentWindow = entry.Window;
+        FitWindow(currentWindow);
         Native.SetForegroundWindow(entry.Window);
+    }
+
+    private void RestoreCurrent()
+    {
+        Placement placement;
+        if (moved.TryGetValue(currentWindow, out placement)) {
+            RestoreWindow(currentWindow, placement);
+            moved.Remove(currentWindow);
+        }
+        currentWindow = IntPtr.Zero;
     }
 
     private void RestoreWindows()
     {
-        foreach (var item in moved) {
-            uint pid;
-            Native.GetWindowThreadProcessId(item.Key, out pid);
-            if (pid != item.Value.Pid) continue;
-            var placement = item.Value.Original;
-            placement.Flags |= 4; // WPF_ASYNCWINDOWPLACEMENT for unresponsive or suspended apps.
-            if (placement.Show == 3) Native.ShowWindowAsync(item.Key, 9);
-            else Native.SetWindowPlacement(item.Key, ref placement);
-            if (placement.Show == 1 || placement.Show == 3) {
-                var r = item.Value.Bounds;
-                Native.SetWindowPos(item.Key, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left,
-                    r.Bottom - r.Top, 0x4014);
-                if (placement.Show == 3) Native.ShowWindowAsync(item.Key, 3);
-            }
+        foreach (var item in moved) RestoreWindow(item.Key, item.Value);
+    }
+
+    private static void RestoreWindow(IntPtr window, Placement saved)
+    {
+        uint pid;
+        Native.GetWindowThreadProcessId(window, out pid);
+        if (pid != saved.Pid || !IsRecordedWindow(window, saved)) return;
+        var placement = saved.Original;
+        placement.Flags |= 4; // WPF_ASYNCWINDOWPLACEMENT for unresponsive or suspended apps.
+        if (placement.Show == 3) Native.ShowWindowAsync(window, 9);
+        else Native.SetWindowPlacement(window, ref placement);
+        if (placement.Show == 1 || placement.Show == 3) {
+            var r = saved.Bounds;
+            Native.SetWindowPos(window, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left,
+                r.Bottom - r.Top, 0x4014);
+            if (placement.Show == 3) Native.ShowWindowAsync(window, 3);
         }
+        ForgetWindow(window);
     }
 
     private static class Native

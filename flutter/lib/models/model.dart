@@ -1373,6 +1373,7 @@ class FfiModel with ChangeNotifier {
     _pi.platform = evt['platform'];
     _pi.sasEnabled = evt['sas_enabled'] == 'true';
     final currentDisplay = int.parse(evt['current_display']);
+    _pi.phoneWorkspaceName = null;
     if (_pi.primaryDisplay == kInvalidDisplayIndex) {
       _pi.primaryDisplay = currentDisplay;
     }
@@ -1405,7 +1406,7 @@ class FfiModel with ChangeNotifier {
       } else {
         final optSession = await bind.sessionGetOption(
             sessionId: sessionId, arg: kOptionTouchMode);
-        _touchMode = optSession != '';
+        _touchMode = optSession != '' || evt['phone_workspace'] == 'true';
       }
     }
     if (isMobile) {
@@ -1427,6 +1428,10 @@ class FfiModel with ChangeNotifier {
         newDisplays.add(evtToDisplay(displays[i]));
       }
       _pi.displays.value = newDisplays;
+      if (evt['phone_workspace'] == 'true' &&
+          currentDisplay >= 0 && currentDisplay < newDisplays.length) {
+        _pi.phoneWorkspaceName = newDisplays[currentDisplay].name;
+      }
       _pi.displaysCount.value = _pi.displays.length;
       if (_pi.currentDisplay < _pi.displays.length) {
         // now replaced to _updateCurDisplay
@@ -1628,6 +1633,7 @@ class FfiModel with ChangeNotifier {
 
   Display evtToDisplay(Map<String, dynamic> evt) {
     var d = Display();
+    d.name = evt['name'] ?? '';
     d.x = evt['x']?.toDouble() ?? d.x;
     d.y = evt['y']?.toDouble() ?? d.y;
     d.width = evt['width'] ?? d.width;
@@ -4453,6 +4459,7 @@ const kInvalidResolutionValue = -1;
 const kVirtualDisplayResolutionValue = 0;
 
 class Display {
+  String name = '';
   double x = 0;
   double y = 0;
   int width = 0;
@@ -4514,6 +4521,10 @@ class Features {
 const kInvalidDisplayIndex = -1;
 
 class PeerInfo with ChangeNotifier {
+  String? phoneWorkspaceName;
+  bool get isPhoneWorkspace => phoneWorkspaceName?.isNotEmpty == true &&
+      currentDisplay >= 0 && currentDisplay < displays.length &&
+      displays[currentDisplay].name == phoneWorkspaceName;
   String version = '';
   String username = '';
   String hostname = '';

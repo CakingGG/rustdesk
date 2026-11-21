@@ -25,6 +25,7 @@ import '../../models/shortcut_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
 import '../widgets/custom_scale_widget.dart';
+import '../widgets/phone_workspace_gestures.dart';
 
 final initText = '1' * 1024;
 
@@ -568,10 +569,14 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                 color: MyTheme.canvasColor,
                                 child: inputModel.isPhysicalMouse.value
                                     ? getBodyForMobile()
-                                    : RawTouchGestureDetectorRegion(
-                                        child: getBodyForMobile(),
-                                        ffi: gFFI,
-                                      ),
+                                    : Consumer<FfiModel>(builder: (_, model, child) {
+                                        if (model.pi.isPhoneWorkspace && model.touchMode &&
+                                            model.keyboard && !model.viewOnly &&
+                                            !inputModel.relativeMouseMode.value) {
+                                          return PhoneWorkspaceGestures(ffi: gFFI, child: child!);
+                                        }
+                                        return RawTouchGestureDetectorRegion(ffi: gFFI, child: child!);
+                                      }, child: getBodyForMobile()),
                               );
                             }),
                           ),
