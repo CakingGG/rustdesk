@@ -3,17 +3,24 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter_hbb/common/phone_workspace_build.dart';
 import 'package:flutter_hbb/common/phone_workspace_release.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _LocalGitHub extends Fake implements HttpClient {
   final HttpClient client;
   final int port;
-  _LocalGitHub(this.client, this.port);
+  final bool serveMirror;
+  _LocalGitHub(this.client, this.port, {this.serveMirror = false});
 
   @override
-  Future<HttpClientRequest> getUrl(Uri uri) =>
-      client.getUrl(uri.replace(scheme: 'http', host: '127.0.0.1', port: port));
+  Future<HttpClientRequest> getUrl(Uri uri) {
+    if (uri.host == phoneWorkspaceDownloadHost && !serveMirror) {
+      throw const SocketException('Mirror offline');
+    }
+    return client
+        .getUrl(uri.replace(scheme: 'http', host: '127.0.0.1', port: port));
+  }
 }
 
 void main() {
@@ -77,6 +84,49 @@ void main() {
           '/CakingGG/rustdesk/releases/download/phone-workspace-14/$name');
     }
   });
+
+  test(
+      'uses the mirror directly and falls back to GitHub for a damaged mirror copy',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final client = HttpClient();
+    final cache = await Directory.systemTemp.createTemp();
+    addTearDown(() async {
+      client.close(force: true);
+      await server.close(force: true);
+      await cache.delete(recursive: true);
+    });
+    var damaged = false;
+    final paths = <String>[];
+    server.listen((request) async {
+      if (request.uri.path.endsWith('/releases')) {
+        request.response.write(jsonEncode([release(18)]));
+      } else {
+        paths.add(request.uri.path);
+        if (request.uri.path.startsWith('/rustdesk/')) {
+          expect(request.headers.value(HttpHeaders.rangeHeader), isNull);
+          request.response.add(damaged ? payload.reversed.toList() : payload);
+        } else {
+          request.response.add(payload);
+        }
+      }
+      await request.response.close();
+    });
+    final github = _LocalGitHub(client, server.port, serveMirror: true);
+    final update = await PhoneWorkspaceRelease.check(github, android: true);
+    final mirror = '/rustdesk/${update.digest}-${update.assetName}';
+    expect(await (await update.download(github, cache, (_) {})).readAsBytes(),
+        payload);
+    expect(paths, [mirror]);
+    damaged = true;
+    paths.clear();
+    expect(await (await update.download(github, cache, (_) {})).readAsBytes(),
+        payload);
+    expect(paths, [
+      mirror,
+      '/CakingGG/rustdesk/releases/download/phone-workspace-18/${update.assetName}'
+    ]);
+  }, skip: phoneWorkspaceDownloadHost.isEmpty);
 
   test(
       'downloads ranges concurrently and finishes an interrupted range from the next byte',

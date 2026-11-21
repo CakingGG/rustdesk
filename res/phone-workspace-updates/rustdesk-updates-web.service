@@ -1,0 +1,22 @@
+[Unit]
+Description=RustDesk phone workspace downloads
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rustdesk-updates
+EnvironmentFile=/etc/rustdesk-updates.env
+Environment=XDG_DATA_HOME=/var/lib/rustdesk-updates/web
+Environment=XDG_CONFIG_HOME=/var/lib/rustdesk-updates/web
+ExecStart=/opt/rustdesk-updates/caddy run --config /opt/rustdesk-updates/Caddyfile --adapter caddyfile
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/rustdesk-updates/web
+PrivateTmp=yes
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

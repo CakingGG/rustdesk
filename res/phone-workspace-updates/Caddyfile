@@ -1,0 +1,24 @@
+{
+	admin off
+	default_sni {$PHONE_WORKSPACE_DOWNLOAD_HOST}
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://{$PHONE_WORKSPACE_DOWNLOAD_HOST} {
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+	@installers path /rustdesk/phone-workspace-x64.msi /rustdesk/phone-workspace-arm64.apk /rustdesk/*-phone-workspace-x64.msi /rustdesk/*-phone-workspace-arm64.apk /rustdesk/latest.json
+	handle @installers {
+		root * /var/lib/rustdesk-updates/public
+		header Cache-Control "no-cache"
+		file_server
+	}
+	handle {
+		respond 404
+	}
+}

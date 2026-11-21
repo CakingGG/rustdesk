@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'phone_workspace_build.dart';
+
 const _repository = 'CakingGG/rustdesk';
 const _partSize = 512 * 1024;
 const _parallelDownloads = 4;
@@ -67,12 +69,12 @@ class PhoneWorkspaceRelease {
     return PhoneWorkspaceRelease._(build, name, bytes, hash[1]!);
   }
 
-  Future<(Uri, HttpClientResponse)> _getRange(
-      HttpClient client, Uri uri, int start, int end) async {
+  Future<(Uri, HttpClientResponse)> _request(
+      HttpClient client, Uri uri, String? range) async {
     for (var redirects = 0;; redirects++) {
       final request = await client.getUrl(uri);
       request.followRedirects = false;
-      request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-$end');
+      if (range != null) request.headers.set(HttpHeaders.rangeHeader, range);
       request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
       final response =
           await request.close().timeout(const Duration(seconds: 30));
@@ -103,7 +105,7 @@ class PhoneWorkspaceRelease {
     for (var attempt = 0;; attempt++) {
       final offset = start + bytes.length;
       try {
-        response ??= (await _getRange(client, uri, offset, end)).$2;
+        response ??= (await _request(client, uri, 'bytes=$offset-$end')).$2;
         if (response.statusCode != HttpStatus.partialContent ||
             response.headers.value(HttpHeaders.contentRangeHeader) !=
                 'bytes $offset-$end/$size') {
@@ -131,10 +133,29 @@ class PhoneWorkspaceRelease {
 
   Future<File> download(HttpClient client, Directory cache,
       void Function(double) onProgress) async {
+    if (phoneWorkspaceDownloadHost.isNotEmpty) {
+      final mirror =
+          Uri.https(phoneWorkspaceDownloadHost, '/rustdesk/$digest-$assetName');
+      try {
+        return await _download(client, cache, onProgress, mirror, null);
+      } catch (error) {
+        if (error is! HttpException &&
+            error is! SocketException &&
+            error is! TlsException &&
+            error is! TimeoutException &&
+            error is! FormatException) rethrow;
+        onProgress(0);
+      }
+    }
     final url = Uri.https('github.com',
         '/$_repository/releases/download/phone-workspace-$build/$assetName');
-    final (uri, response) =
-        await _getRange(client, url, 0, math.min(_partSize, size) - 1);
+    return _download(client, cache, onProgress, url,
+        'bytes=0-${math.min(_partSize, size) - 1}');
+  }
+
+  Future<File> _download(HttpClient client, Directory cache,
+      void Function(double) onProgress, Uri url, String? range) async {
+    final (uri, response) = await _request(client, url, range);
     final partial = response.statusCode == HttpStatus.partialContent;
     if (!partial && response.statusCode != HttpStatus.ok) {
       await response.listen((_) {}).cancel();

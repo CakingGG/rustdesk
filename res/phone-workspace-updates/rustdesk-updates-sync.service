@@ -1,0 +1,15 @@
+[Unit]
+Description=Mirror the latest published RustDesk phone workspace installers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=rustdesk-updates
+ExecStart=/usr/bin/python3 /opt/rustdesk-updates/sync.py
+Nice=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/rustdesk-updates/public
+PrivateTmp=yes

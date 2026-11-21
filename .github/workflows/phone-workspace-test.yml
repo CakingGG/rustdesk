@@ -94,7 +94,12 @@ jobs:
         ~/.cargo/bin/flutter_rust_bridge_codegen --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart --c-output ./flutter/macos/Runner/bridge_generated.h
         cp ./flutter/macos/Runner/bridge_generated.h ./flutter/ios/Runner/bridge_generated.h
     - name: Stamp the phone workspace update channel
-      run: echo "const int phoneWorkspaceBuild = $GITHUB_RUN_NUMBER;" > flutter/lib/common/phone_workspace_build.dart
+      env:
+        DOWNLOAD_HOST: ${{ vars.PHONE_WORKSPACE_DOWNLOAD_HOST }}
+      run: |
+        [[ "$DOWNLOAD_HOST" =~ ^[a-zA-Z0-9.-]*$ ]]
+        printf 'const int phoneWorkspaceBuild = %s;\nconst String phoneWorkspaceDownloadHost = "%s";\n' \
+          "$GITHUB_RUN_NUMBER" "$DOWNLOAD_HOST" > flutter/lib/common/phone_workspace_build.dart
     - name: Upload Artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
