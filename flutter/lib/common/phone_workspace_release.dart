@@ -15,27 +15,10 @@ class PhoneWorkspaceRelease {
 
   PhoneWorkspaceRelease._(this.build, this.assetName, this.size, this.digest);
 
-  static PhoneWorkspaceRelease? fromGitHub(Map<String, dynamic> release,
-      {required bool android}) {
-    final match = _tag.firstMatch(release['tag_name'] as String? ?? '');
-    if (match == null || release['draft'] != false) return null;
-    final name =
-        android ? 'phone-workspace-arm64.apk' : 'phone-workspace-x64.msi';
-    final asset = (release['assets'] as List)
-        .whereType<Map<String, dynamic>>()
-        .singleWhere((a) => a['name'] == name && a['state'] == 'uploaded');
-    final hash = _digest.firstMatch(asset['digest'] as String? ?? '');
-    final bytes = asset['size'];
-    if (hash == null || bytes is! int || bytes <= 0) {
-      throw const FormatException(
-          'Missing installer size or SHA-256 on GitHub');
-    }
-    return PhoneWorkspaceRelease._(int.parse(match[1]!), name, bytes, hash[1]!);
-  }
-
   static Future<PhoneWorkspaceRelease> check(HttpClient client,
       {required bool android}) async {
-    PhoneWorkspaceRelease? latest;
+    Map<String, dynamic>? latest;
+    var build = 0;
     for (var page = 1;; page++) {
       final uri = Uri.https('api.github.com', '/repos/$_repository/releases',
           {'per_page': '100', 'page': '$page'});
@@ -51,10 +34,12 @@ class PhoneWorkspaceRelease {
           .bind(response.timeout(const Duration(seconds: 30)))
           .join()) as List;
       for (final release in releases.whereType<Map<String, dynamic>>()) {
-        final candidate = fromGitHub(release, android: android);
-        if (candidate != null &&
-            (latest == null || candidate.build > latest.build)) {
-          latest = candidate;
+        final tag = _tag.firstMatch(release['tag_name'] as String? ?? '');
+        if (tag == null || release['draft'] != false) continue;
+        final number = int.parse(tag[1]!);
+        if (number > build) {
+          build = number;
+          latest = release;
         }
       }
       if (releases.length < 100) break;
@@ -62,7 +47,18 @@ class PhoneWorkspaceRelease {
     if (latest == null) {
       throw const FormatException('No published phone workspace build');
     }
-    return latest;
+    final name =
+        android ? 'phone-workspace-arm64.apk' : 'phone-workspace-x64.msi';
+    final asset = (latest['assets'] as List)
+        .whereType<Map<String, dynamic>>()
+        .singleWhere((a) => a['name'] == name && a['state'] == 'uploaded');
+    final hash = _digest.firstMatch(asset['digest'] as String? ?? '');
+    final bytes = asset['size'];
+    if (hash == null || bytes is! int || bytes <= 0) {
+      throw const FormatException(
+          'Missing installer size or SHA-256 on GitHub');
+    }
+    return PhoneWorkspaceRelease._(build, name, bytes, hash[1]!);
   }
 
   Future<File> download(HttpClient client, Directory cache,

@@ -294,7 +294,6 @@ internal sealed partial class PhoneWorkspace
             BackColor = Color.FromArgb(28, 67, 124);
             ForeColor = Color.White;
             Cursor = Cursors.Hand;
-            DoubleBuffered = true;
             AccessibleName = TextFor("Switch application", "切换应用");
         }
         protected override bool ShowWithoutActivation { get { return true; } }

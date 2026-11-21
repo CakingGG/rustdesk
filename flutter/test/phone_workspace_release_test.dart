@@ -52,7 +52,7 @@ void main() {
       if (request.uri.path.endsWith('/releases')) {
         request.response.write(jsonEncode([
           {'tag_name': '1.9.0', 'draft': false},
-          release(9),
+          {...release(9), 'assets': []},
           release(14),
           {...release(15), 'draft': true}
         ]));
@@ -87,13 +87,17 @@ void main() {
       await cache.delete(recursive: true);
     });
     server.listen((request) async {
-      request.response.add(payload.reversed.toList());
+      if (request.uri.path.endsWith('/releases')) {
+        request.response.write(jsonEncode([release(1)]));
+      } else {
+        request.response.add(payload.reversed.toList());
+      }
       await request.response.close();
     });
-    final update = PhoneWorkspaceRelease.fromGitHub(release(1), android: true)!;
+    final github = _LocalGitHub(client, server.port);
+    final update = await PhoneWorkspaceRelease.check(github, android: true);
     await expectLater(
-        update.download(_LocalGitHub(client, server.port), cache, (_) {}),
-        throwsFormatException);
+        update.download(github, cache, (_) {}), throwsFormatException);
     expect(cache.listSync(recursive: true).whereType<File>(), isEmpty);
   });
 }
