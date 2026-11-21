@@ -584,8 +584,9 @@ jobs:
         apk=$(find signed-apk -name '*.apk' -print -quit)
         tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
         cert_sha256=c7b11b337c030a57c3e3eaa6dfa4ad907a9a46416c6bae750168869d5e6fadc0
-        "$tools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/phone-signer.txt"
-        grep -Fx "Signer #1 certificate SHA-256 digest: $cert_sha256" "$RUNNER_TEMP/phone-signer.txt"
+        "$tools/apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/phone-signer.txt"
+        fingerprints=$(awk '/certificate SHA-256 digest:/ {print tolower($NF)}' "$RUNNER_TEMP/phone-signer.txt" | sort -u)
+        test "$fingerprints" = "$cert_sha256"
         "$tools/aapt" dump badging "$apk" | grep -F "name='com.carriez.flutter_hbb.phoneworkspace'"
         unzip -p "$apk" lib/arm64-v8a/librustdesk.so > "$RUNNER_TEMP/phone-library.so"
         readelf --wide --dyn-syms "$RUNNER_TEMP/phone-library.so" | grep -F Java_ffi_FFI_setPhoneDisplay
