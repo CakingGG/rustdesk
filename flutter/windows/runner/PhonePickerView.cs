@@ -96,7 +96,8 @@ internal sealed partial class PhoneWorkspace
         // Work in phone-sized logical units even when the video is 864 or 1080 pixels wide.
         float scale = Math.Max(0.65f, Math.Min(area.Width, area.Height) / 390f);
         if (!expanded) {
-            returnHandle.Place(area, scale);
+            var screen = TargetScreen();
+            returnHandle.Place(screen == null ? area : screen.Bounds, scale);
             Hide();
             return;
         }
@@ -261,8 +262,13 @@ internal sealed partial class PhoneWorkspace
             g.DrawImage(image, rect);
             var flags = TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
             if (grid) {
-                TextRenderer.DrawText(g, entry.Name, picker.caption, new Rectangle(picker.Px(3), rect.Bottom + picker.Px(3),
-                    Width - picker.Px(6), Height - rect.Bottom - picker.Px(3)), Ink, flags | TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
+                int top = rect.Bottom + picker.Px(3);
+                using (var format = new StringFormat { Alignment = StringAlignment.Center,
+                    FormatFlags = StringFormatFlags.LineLimit, Trimming = StringTrimming.EllipsisCharacter })
+                using (var brush = new SolidBrush(Ink)) {
+                    g.DrawString(entry.Name, picker.caption, brush, new RectangleF(picker.Px(3), top,
+                        Width - picker.Px(6), Math.Min(Height-top, (float)Math.Ceiling(2*picker.caption.GetHeight(g))+1)), format);
+                }
             } else {
                 int left = rect.Right + pad, w = Math.Max(1, Width-left-pad);
                 flags |= TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
