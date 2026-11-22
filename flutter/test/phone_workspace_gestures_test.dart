@@ -53,6 +53,10 @@ class _Canvas extends Fake implements CanvasModel {
 class _Wheel extends Fake implements RustdeskImpl {
   int distance = 0;
   @override
+  int peerGetSessionsCount(
+          {required String id, required int connType, dynamic hint}) =>
+      1;
+  @override
   Future<void> sessionSendMouse(
       {required SessionID sessionId, required String msg, dynamic hint}) async {
     final event = jsonDecode(msg);
@@ -62,6 +66,8 @@ class _Wheel extends Fake implements RustdeskImpl {
 }
 
 class _Session extends Fake implements FFI {
+  @override
+  ConnType get connType => ConnType.defaultConn;
   @override
   final sessionId = UuidValue('00000000-0000-4000-8000-000000000001');
   @override
@@ -162,6 +168,34 @@ void main() {
     pi.displays.value = [physical, phone];
     expect(pi.isPhoneWorkspace, isFalse);
     pi.currentDisplay = 1;
+    expect(pi.isPhoneWorkspace, isTrue);
+  });
+
+  test('a geometry update preserves the phone gestures when switching back', () {
+    final session = _Session();
+    platformFFI.setBindingForTesting(_Wheel());
+    final model = FfiModel(WeakReference(session));
+    final pi = model.pi
+      ..phoneWorkspaceName = 'phone'
+      ..isSupportMultiUiSession = true
+      ..displays.addAll([
+        Display()..name = 'physical',
+        Display()..name = 'phone',
+      ]);
+    model.handleSwitchDisplay({
+      'display': '1',
+      'x': '1920',
+      'y': '0',
+      'width': '900',
+      'height': '1800',
+      'original_width': '900',
+      'original_height': '1800',
+      'cursor_embedded': '0',
+      'resolutions': '[]',
+    }, session.sessionId, 'peer');
+    expect(pi.isPhoneWorkspace, isFalse);
+    pi.currentDisplay = 1;
+    expect(pi.displays[1].width, 900);
     expect(pi.isPhoneWorkspace, isTrue);
   });
 }

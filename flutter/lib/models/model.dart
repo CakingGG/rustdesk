@@ -834,7 +834,9 @@ class FfiModel with ChangeNotifier {
       // It is only used to update the display info.
     }
 
-    var newDisplay = Display();
+    // switch_display carries geometry only. The monitor name identifies the
+    // phone workspace and comes from the most recent display inventory.
+    var newDisplay = Display()..name = _pi.displays[display].name;
     newDisplay.x = double.tryParse(evt['x']) ?? newDisplay.x;
     newDisplay.y = double.tryParse(evt['y']) ?? newDisplay.y;
     newDisplay.width = int.tryParse(evt['width']) ?? newDisplay.width;

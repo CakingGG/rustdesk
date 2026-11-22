@@ -567,19 +567,24 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                               }
                               return Container(
                                 color: MyTheme.canvasColor,
-                                child: inputModel.isPhysicalMouse.value
-                                    ? getBodyForMobile()
-                                    : Consumer<FfiModel>(
-                                        child: getBodyForMobile(),
-                                        builder: (_, model, child) {
-                                          final standard = RawTouchGestureDetectorRegion(
-                                              ffi: gFFI, child: child!);
-                                          if (!model.pi.isPhoneWorkspace || !model.touchMode ||
-                                              !model.keyboard || model.viewOnly) return standard;
-                                          return Obx(() => inputModel.relativeMouseMode.value
-                                              ? standard
-                                              : PhoneWorkspaceGestures(ffi: gFFI, child: child));
-                                        }),
+                                child: Consumer<FfiModel>(
+                                  builder: (_, model, __) => Obx(() {
+                                    if (inputModel.isPhysicalMouse.value) {
+                                      return getBodyForMobile();
+                                    }
+                                    if (model.pi.isPhoneWorkspace &&
+                                        model.touchMode &&
+                                        model.keyboard &&
+                                        !model.viewOnly &&
+                                        !inputModel.relativeMouseMode.value) {
+                                      return PhoneWorkspaceGestures(
+                                          ffi: gFFI,
+                                          child: getBodyForMobile(hideCursor: true));
+                                    }
+                                    return RawTouchGestureDetectorRegion(
+                                        ffi: gFFI, child: getBodyForMobile());
+                                  }),
+                                ),
                               );
                             }),
                           ),
@@ -714,7 +719,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       !gFFI.canvasModel.cursorEmbedded &&
       !gFFI.inputModel.relativeMouseMode.value;
 
-  Widget getBodyForMobile() {
+  Widget getBodyForMobile({bool hideCursor = false}) {
     return Container(
         color: MyTheme.canvasColor,
         child: Stack(children: () {
@@ -764,7 +769,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                     ).workaroundFreezeLinuxMint(),
             ),
           ];
-          if (showCursorPaint) {
+          if (!hideCursor && showCursorPaint) {
             paints.add(CursorPaint(widget.id));
           }
           if (gFFI.ffiModel.touchMode) {
